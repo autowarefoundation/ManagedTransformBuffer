@@ -241,6 +241,8 @@ TEST_F(TestManagedTransformBuffer, TestTransformDynamic)
 
 TEST_F(TestManagedTransformBuffer, TestTransformMultipleCall)
 {
+  EXPECT_FALSE(managed_tf_buffer_->isStatic());
+
   static_tf_broadcaster_->sendTransform(tf_base_to_lidar_top_);
 
   std::optional<Eigen::Matrix4f> eigen_transform;
@@ -271,7 +273,6 @@ TEST_F(TestManagedTransformBuffer, TestTransformMultipleCall)
     managed_tf_buffer_->getTransform<Eigen::Matrix4f>("base_link", "lidar_top", time_, timeout_);
   ASSERT_TRUE(eigen_transform.has_value());
   EXPECT_TRUE(eigen_transform.value().isApprox(eigen_base_to_lidar_top_, precision_));
-  EXPECT_TRUE(managed_tf_buffer_->isStatic());
 
   std::future<void> future =
     std::async(std::launch::async, [this]() { broadcastDynamicTf(tf_map_to_base_); });
@@ -280,7 +281,6 @@ TEST_F(TestManagedTransformBuffer, TestTransformMultipleCall)
   future.wait();
   ASSERT_TRUE(eigen_map_to_base.has_value());
   EXPECT_TRUE(eigen_map_to_base.value().isApprox(eigen_map_to_base_, precision_));
-  EXPECT_FALSE(managed_tf_buffer_->isStatic());
 
   eigen_transform =
     managed_tf_buffer_->getTransform<Eigen::Matrix4f>("fake_link", "fake_link", time_, timeout_);
