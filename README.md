@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This package contains a wrapper of ROS 2 TF buffer & listener. It offers better pefromance
+This package contains a wrapper of ROS 2 TF buffer & listener. It offers better performance
 in large systems with multiple TF listeners to static transformations.
 
 ![Managed Transform Buffer](https://github.com/user-attachments/assets/b8c29b6a-fc77-4941-a50b-8aa30fdc2e36)

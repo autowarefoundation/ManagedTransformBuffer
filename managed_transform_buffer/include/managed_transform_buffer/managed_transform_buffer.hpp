@@ -22,15 +22,16 @@
 
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <tf2_msgs/msg/tf_message.hpp>
 
 #include <tf2/LinearMath/Transform.h>
 #include <tf2_ros/buffer.h>
-#include <tf2_ros/transform_listener.h>
 
 #include <chrono>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <random>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -99,10 +100,12 @@ public:
   /**
    * @brief Construct a new Managed Transform Buffer object
    *
-   * @param[in] node the node to use for the transform buffer
-   * @param[in] managed whether managed buffer feature should be used
+   * @param[in] clock A clock to use for time and sleeping
+   * @param[in] cache_time How long to keep a history of transforms
    */
-  explicit ManagedTransformBuffer(rclcpp::Node * node, bool managed = true);
+  explicit ManagedTransformBuffer(
+    rclcpp::Clock::SharedPtr clock,
+    tf2::Duration cache_time = tf2::Duration(tf2::BUFFER_CORE_DEFAULT_CACHE_TIME));
 
   /** @brief Destroy the Managed Transform Buffer object */
   ~ManagedTransformBuffer();
@@ -129,21 +132,40 @@ public:
   template <typename T = TransformStamped>
   std::enable_if_t<std::is_same_v<T, TransformStamped>, std::optional<TransformStamped>>
   getTransform(
-    const std::string & target_frame, const std::string & source_frame,
-    const rclcpp::Time & time = rclcpp::Time(0),
-    const rclcpp::Duration & timeout = default_timeout);
+    const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+    const tf2::Duration & timeout);
 
   template <typename T = Eigen::Matrix4f>
   std::enable_if_t<std::is_same_v<T, Eigen::Matrix4f>, std::optional<Eigen::Matrix4f>> getTransform(
-    const std::string & target_frame, const std::string & source_frame,
-    const rclcpp::Time & time = rclcpp::Time(0),
-    const rclcpp::Duration & timeout = default_timeout);
+    const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+    const tf2::Duration & timeout);
 
   template <typename T = tf2::Transform>
   std::enable_if_t<std::is_same_v<T, tf2::Transform>, std::optional<tf2::Transform>> getTransform(
-    const std::string & target_frame, const std::string & source_frame,
-    const rclcpp::Time & time = rclcpp::Time(0),
-    const rclcpp::Duration & timeout = default_timeout);
+    const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+    const tf2::Duration & timeout);
+
+  /**
+   * @brief Get the transform between two frames by frame ID.
+   *
+   * @sa getTransform(const std::string &, const std::string &, const tf2::TimePoint &, const
+   * tf2::Duration)
+   */
+  template <typename T = TransformStamped>
+  std::enable_if_t<std::is_same_v<T, TransformStamped>, std::optional<TransformStamped>>
+  getTransform(
+    const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
+    const rclcpp::Duration & timeout);
+
+  template <typename T = Eigen::Matrix4f>
+  std::enable_if_t<std::is_same_v<T, Eigen::Matrix4f>, std::optional<Eigen::Matrix4f>> getTransform(
+    const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
+    const rclcpp::Duration & timeout);
+
+  template <typename T = tf2::Transform>
+  std::enable_if_t<std::is_same_v<T, tf2::Transform>, std::optional<tf2::Transform>> getTransform(
+    const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
+    const rclcpp::Duration & timeout);
 
   /**
    * @brief Transforms a point cloud from one frame to another.
@@ -151,27 +173,49 @@ public:
    * @param[in] target_frame the target TF frame
    * @param[in] cloud_in the input point cloud
    * @param[out] cloud_out the resultant output point cloud
-   * @param[in] time the time at which the value of the transform is desired (0 will get the latest)
+   * @param[in] time the time at which the value of the transform is desired
    * @param[in] timeout how long to block before failing
    * @return true if the transformation is successful, false otherwise
    */
   bool transformPointcloud(
     const std::string & target_frame, const sensor_msgs::msg::PointCloud2 & cloud_in,
-    sensor_msgs::msg::PointCloud2 & cloud_out, const rclcpp::Time & time = rclcpp::Time(0),
-    const rclcpp::Duration & timeout = default_timeout);
+    sensor_msgs::msg::PointCloud2 & cloud_out, const tf2::TimePoint & time,
+    const tf2::Duration & timeout);
+
+  /**
+   * @brief Transforms a point cloud from one frame to another.
+   *
+   * @sa transformPointcloud(const std::string &, const sensor_msgs::msg::PointCloud2 &,
+   * sensor_msgs::msg::PointCloud2 &, const tf2::TimePoint &, const tf2::Duration)
+   */
+  bool transformPointcloud(
+    const std::string & target_frame, const sensor_msgs::msg::PointCloud2 & cloud_in,
+    sensor_msgs::msg::PointCloud2 & cloud_out, const rclcpp::Time & time,
+    const rclcpp::Duration & timeout);
+
+  /** @brief Check if all TFs requests have been for static TF so far.
+   * @return true if only static TFs have been requested
+   */
+  bool isStatic() const;
 
 private:
-  /** @brief Initialize TF listener used for storing transforms */
+  /** @brief Initialize TF listener */
   void activateListener();
-
-  /** @brief Initialize local TF listener used for building TF tree */
-  void activateLocalListener();
 
   /** @brief Deactivate TF listener */
   void deactivateListener();
 
-  /** @brief Deactivate local TF listener */
-  void deactivateLocalListener();
+  /** @brief Register TF buffer as unknown. */
+  void registerAsUnknown();
+
+  /** @brief Register TF buffer as dynamic. */
+  void registerAsDynamic();
+
+  /** @brief Generate a unique node name
+   *
+   * @return a unique node name
+   */
+  std::string generateUniqueNodeName();
 
   /** @brief Callback for TF messages
    *
@@ -189,9 +233,8 @@ private:
    * @return an optional containing the transform if successful, or empty if not
    */
   std::optional<TransformStamped> lookupTransform(
-    const std::string & target_frame, const std::string & source_frame,
-    const rclcpp::Time & time = rclcpp::Time(0),
-    const rclcpp::Duration & timeout = default_timeout) const;
+    const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+    const tf2::Duration & timeout) const;
 
   /** @brief Traverse TF tree built by local TF listener.
    *
@@ -202,7 +245,7 @@ private:
    */
   TraverseResult traverseTree(
     const std::string & target_frame, const std::string & source_frame,
-    const rclcpp::Duration & timeout = default_timeout);
+    const tf2::Duration & timeout);
 
   /** @brief Get a dynamic transform from the TF buffer.
    *
@@ -213,9 +256,8 @@ private:
    * @return an optional containing the transform if successful, or empty if not
    */
   std::optional<TransformStamped> getDynamicTransform(
-    const std::string & target_frame, const std::string & source_frame,
-    const rclcpp::Time & time = rclcpp::Time(0),
-    const rclcpp::Duration & timeout = default_timeout);
+    const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+    const tf2::Duration & timeout);
 
   /** @brief Get a static transform from local TF buffer.
    *
@@ -235,30 +277,30 @@ private:
    * @return an optional containing the transform if successful, or empty if not
    */
   std::optional<TransformStamped> getUnknownTransform(
-    const std::string & target_frame, const std::string & source_frame,
-    const rclcpp::Time & time = rclcpp::Time(0),
-    const rclcpp::Duration & timeout = default_timeout);
+    const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+    const tf2::Duration & timeout);
 
+  rclcpp::Node::SharedPtr node_{nullptr};
+  rclcpp::Clock::SharedPtr clock_{nullptr};
   rclcpp::CallbackGroup::SharedPtr callback_group_{nullptr};
-  rclcpp::Node * const node_;
-  rclcpp::Node::SharedPtr managed_listener_node_{nullptr};
   rclcpp::NodeOptions options_;
   rclcpp::Subscription<tf2_msgs::msg::TFMessage>::SharedPtr tf_static_sub_{nullptr};
   rclcpp::Subscription<tf2_msgs::msg::TFMessage>::SharedPtr tf_sub_{nullptr};
   rclcpp::SubscriptionOptionsWithAllocator<std::allocator<void>> tf_options_;
   rclcpp::SubscriptionOptionsWithAllocator<std::allocator<void>> tf_static_options_;
-  rclcpp::executors::SingleThreadedExecutor::SharedPtr executor_{nullptr};
   std::function<std::optional<TransformStamped>(
-    const std::string &, const std::string &, const rclcpp::Time &, const rclcpp::Duration &)>
+    const std::string &, const std::string &, const tf2::TimePoint &, const tf2::Duration &)>
     get_transform_;
   std::function<void(tf2_msgs::msg::TFMessage::SharedPtr)> cb_;
   std::function<void(tf2_msgs::msg::TFMessage::SharedPtr)> cb_static_;
-  std::unique_ptr<std::thread> dedicated_listener_thread_;
+  std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> executor_{nullptr};
+  std::shared_ptr<std::thread> executor_thread_{nullptr};
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
-  std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
   std::unique_ptr<TFMap> static_tf_buffer_;
   std::unique_ptr<TreeMap> tf_tree_;
-  static std::chrono::milliseconds default_timeout;
+  std::mt19937 random_engine_;
+  std::uniform_int_distribution<> dis_;
+  bool is_static_{true};
 };
 
 }  // namespace managed_transform_buffer
