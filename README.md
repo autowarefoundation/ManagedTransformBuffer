@@ -4,7 +4,7 @@
 
 This package contains a wrapper of ROS 2 TF buffer & listener. It offers better performance in large systems with multiple TF listeners.
 
-![Managed Transform Buffer](https://github.com/user-attachments/assets/b8c29b6a-fc77-4941-a50b-8aa30fdc2e36)
+![Managed Transform Buffer](https://github.com/user-attachments/assets/97f472c8-7797-413e-a78b-e86f900797a6)
 
 Apart from the obvious benefits in cases of static-only transformations, it also boosts performance for scenarios with Composable Node Containers thanks to the use of the Singleton pattern.
 
