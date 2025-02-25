@@ -16,6 +16,7 @@ ament_auto_find_build_dependencies()
 
 ament_auto_add_library(${PROJECT_NAME} SHARED
   src/managed_transform_buffer.cpp
+  src/managed_transform_buffer_provider.cpp
 )
 
 if(BUILD_TESTING)

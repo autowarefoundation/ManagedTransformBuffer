@@ -17,76 +17,36 @@
 #include "managed_transform_buffer/managed_transform_buffer.hpp"
 
 #include <pcl_ros/transforms.hpp>
-#include <tf2_ros/qos.hpp>
 
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 #include <pcl_conversions/pcl_conversions.h>
-#include <tf2/convert.h>
-#include <tf2/exceptions.h>
-#include <tf2_ros/create_timer_ros.h>
-
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <cstdint>
-#include <future>
-#include <string>
 
 namespace managed_transform_buffer
 {
 
-std::chrono::milliseconds ManagedTransformBuffer::default_timeout = 10ms;
-
-ManagedTransformBuffer::ManagedTransformBuffer(rclcpp::Node * node, bool managed) : node_(node)
+ManagedTransformBuffer::ManagedTransformBuffer(
+  rclcpp::Clock::SharedPtr clock, tf2::Duration cache_time)
 {
-  get_transform_ = [this, managed](
-                     const std::string & target_frame, const std::string & source_frame,
-                     const rclcpp::Time & time,
-                     const rclcpp::Duration & timeout) -> std::optional<TransformStamped> {
-    if (managed) {
-      return getUnknownTransform(target_frame, source_frame, time, timeout);
-    }
-    return getDynamicTransform(target_frame, source_frame, time, timeout);
-  };
-
-  static_tf_buffer_ = std::make_unique<TFMap>();
-  tf_tree_ = std::make_unique<TreeMap>();
-  tf_buffer_ = std::make_unique<tf2_ros::Buffer>(node_->get_clock());
-  auto timer_interface = std::make_shared<tf2_ros::CreateTimerROS>(
-    node_->get_node_base_interface(), node_->get_node_timers_interface());
-  tf_buffer_->setCreateTimerInterface(timer_interface);
-  tf_options_ = tf2_ros::detail::get_default_transform_listener_sub_options();
-  tf_static_options_ = tf2_ros::detail::get_default_transform_listener_static_sub_options();
-  cb_ = std::bind(&ManagedTransformBuffer::tfCallback, this, std::placeholders::_1, false);
-  cb_static_ = std::bind(&ManagedTransformBuffer::tfCallback, this, std::placeholders::_1, true);
-  std::stringstream sstream;
-  sstream << "managed_tf_listener_impl_" << std::hex << reinterpret_cast<std::size_t>(this);
-  options_.arguments({"--ros-args", "-r", "__node:=" + std::string(sstream.str())});
-  options_.start_parameter_event_publisher(false);
-  options_.start_parameter_services(false);
+  provider_ = &ManagedTransformBufferProvider::getInstance(clock, cache_time);
 }
 
-ManagedTransformBuffer::~ManagedTransformBuffer()
-{
-  deactivateListener();
-  deactivateLocalListener();
-}
+ManagedTransformBuffer::~ManagedTransformBuffer() = default;
 
 template <>
 std::optional<TransformStamped> ManagedTransformBuffer::getTransform<TransformStamped>(
-  const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
-  const rclcpp::Duration & timeout)
+  const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+  const tf2::Duration & timeout)
 {
-  return get_transform_(target_frame, source_frame, time, timeout);
+  return provider_->getTransform(target_frame, source_frame, time, timeout);
 }
 
 template <>
 std::optional<Eigen::Matrix4f> ManagedTransformBuffer::getTransform<Eigen::Matrix4f>(
-  const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
-  const rclcpp::Duration & timeout)
+  const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+  const tf2::Duration & timeout)
 {
-  auto tf = get_transform_(target_frame, source_frame, time, timeout);
+  auto tf = provider_->getTransform(target_frame, source_frame, time, timeout);
   if (!tf.has_value()) {
     return std::nullopt;
   }
@@ -97,10 +57,10 @@ std::optional<Eigen::Matrix4f> ManagedTransformBuffer::getTransform<Eigen::Matri
 
 template <>
 std::optional<tf2::Transform> ManagedTransformBuffer::getTransform<tf2::Transform>(
-  const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
-  const rclcpp::Duration & timeout)
+  const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+  const tf2::Duration & timeout)
 {
-  auto tf = get_transform_(target_frame, source_frame, time, timeout);
+  auto tf = provider_->getTransform(target_frame, source_frame, time, timeout);
   if (!tf.has_value()) {
     return std::nullopt;
   }
@@ -109,15 +69,41 @@ std::optional<tf2::Transform> ManagedTransformBuffer::getTransform<tf2::Transfor
   return std::make_optional<tf2::Transform>(tf2_transform);
 }
 
+template <>
+std::optional<TransformStamped> ManagedTransformBuffer::getTransform<TransformStamped>(
+  const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
+  const rclcpp::Duration & timeout)
+{
+  return getTransform<TransformStamped>(
+    target_frame, source_frame, tf2_ros::fromRclcpp(time), tf2_ros::fromRclcpp(timeout));
+}
+
+template <>
+std::optional<Eigen::Matrix4f> ManagedTransformBuffer::getTransform<Eigen::Matrix4f>(
+  const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
+  const rclcpp::Duration & timeout)
+{
+  return getTransform<Eigen::Matrix4f>(
+    target_frame, source_frame, tf2_ros::fromRclcpp(time), tf2_ros::fromRclcpp(timeout));
+}
+
+template <>
+std::optional<tf2::Transform> ManagedTransformBuffer::getTransform<tf2::Transform>(
+  const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
+  const rclcpp::Duration & timeout)
+{
+  return getTransform<tf2::Transform>(
+    target_frame, source_frame, tf2_ros::fromRclcpp(time), tf2_ros::fromRclcpp(timeout));
+}
+
 bool ManagedTransformBuffer::transformPointcloud(
   const std::string & target_frame, const sensor_msgs::msg::PointCloud2 & cloud_in,
-  sensor_msgs::msg::PointCloud2 & cloud_out, const rclcpp::Time & time,
-  const rclcpp::Duration & timeout)
+  sensor_msgs::msg::PointCloud2 & cloud_out, const tf2::TimePoint & time,
+  const tf2::Duration & timeout)
 {
   if (
     pcl::getFieldIndex(cloud_in, "x") == -1 || pcl::getFieldIndex(cloud_in, "y") == -1 ||
     pcl::getFieldIndex(cloud_in, "z") == -1) {
-    RCLCPP_ERROR(node_->get_logger(), "Input pointcloud does not have xyz fields");
     return false;
   }
   if (target_frame == cloud_in.header.frame_id) {
@@ -134,250 +120,18 @@ bool ManagedTransformBuffer::transformPointcloud(
   return true;
 }
 
-void ManagedTransformBuffer::activateListener()
-{
-  tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
-}
-
-void ManagedTransformBuffer::activateLocalListener()
-{
-  managed_listener_node_ = rclcpp::Node::make_unique("_", options_);
-  callback_group_ = managed_listener_node_->create_callback_group(
-    rclcpp::CallbackGroupType::MutuallyExclusive, false);
-  tf_options_.callback_group = callback_group_;
-  tf_static_options_.callback_group = callback_group_;
-  tf_sub_ = rclcpp::create_subscription<tf2_msgs::msg::TFMessage>(
-    managed_listener_node_, "/tf", tf2_ros::DynamicListenerQoS(), cb_, tf_options_);
-  tf_static_sub_ = rclcpp::create_subscription<tf2_msgs::msg::TFMessage>(
-    managed_listener_node_, "/tf_static", tf2_ros::StaticListenerQoS(), cb_static_,
-    tf_static_options_);
-  executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
-  executor_->add_callback_group(callback_group_, managed_listener_node_->get_node_base_interface());
-  dedicated_listener_thread_ = std::make_unique<std::thread>([&]() { executor_->spin(); });
-}
-
-void ManagedTransformBuffer::deactivateListener()
-{
-  tf_listener_.reset();
-}
-
-void ManagedTransformBuffer::deactivateLocalListener()
-{
-  if (executor_) {
-    executor_->cancel();
-  }
-  if (dedicated_listener_thread_ && dedicated_listener_thread_->joinable()) {
-    dedicated_listener_thread_->join();
-  }
-  tf_static_sub_.reset();
-  tf_sub_.reset();
-  managed_listener_node_.reset();
-  executor_.reset();
-  dedicated_listener_thread_.reset();
-}
-
-void ManagedTransformBuffer::tfCallback(
-  const tf2_msgs::msg::TFMessage::SharedPtr msg, const bool is_static)
-{
-  for (const auto & transform : msg->transforms) {
-    tf_tree_->emplace(transform.child_frame_id, TreeNode{transform.header.frame_id, is_static});
-  }
-}
-
-std::optional<TransformStamped> ManagedTransformBuffer::lookupTransform(
-  const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
-  const rclcpp::Duration & timeout) const
-{
-  try {
-    auto tf = tf_buffer_->lookupTransform(target_frame, source_frame, time, timeout);
-    return std::make_optional<TransformStamped>(tf);
-  } catch (const tf2::TransformException & ex) {
-    RCLCPP_ERROR(
-      node_->get_logger(), "Failure to get transform from %s to %s with error: %s",
-      target_frame.c_str(), source_frame.c_str(), ex.what());
-    return std::nullopt;
-  }
-}
-
-TraverseResult ManagedTransformBuffer::traverseTree(
-  const std::string & target_frame, const std::string & source_frame,
+bool ManagedTransformBuffer::transformPointcloud(
+  const std::string & target_frame, const sensor_msgs::msg::PointCloud2 & cloud_in,
+  sensor_msgs::msg::PointCloud2 & cloud_out, const rclcpp::Time & time,
   const rclcpp::Duration & timeout)
 {
-  std::atomic<bool> timeout_reached{false};
-
-  auto framesToRoot = [this](
-                        const std::string & start_frame, TreeMap & last_tf_tree,
-                        std::vector<std::string> & frames_out) -> bool {
-    frames_out.push_back(start_frame);
-    uint32_t depth = 0;
-    auto current_frame = start_frame;
-    auto frame_it = last_tf_tree.find(current_frame);
-    while (frame_it != last_tf_tree.end()) {
-      current_frame = frame_it->second.parent;
-      frames_out.push_back(current_frame);
-      frame_it = last_tf_tree.find(current_frame);
-      depth++;
-      if (depth > tf2::BufferCore::MAX_GRAPH_DEPTH) {
-        RCLCPP_ERROR(node_->get_logger(), "Traverse depth exceeded for %s", start_frame.c_str());
-        return false;
-      }
-    }
-    return true;
-  };
-
-  auto traverse = [this, &timeout_reached, &framesToRoot](
-                    const std::string & t1, const std::string & t2) -> TraverseResult {
-    while (!timeout_reached) {
-      std::vector<std::string> frames_from_t1;
-      std::vector<std::string> frames_from_t2;
-      auto last_tf_tree = *tf_tree_;
-
-      // Collect all frames from bottom to the top of TF tree for both frames
-      if (
-        !framesToRoot(t1, last_tf_tree, frames_from_t1) ||
-        !framesToRoot(t2, last_tf_tree, frames_from_t2)) {
-        // Possibly TF loop occurred
-        return {false, false};
-      }
-
-      // Find common ancestor
-      bool only_static_requested_from_t1 = true;
-      bool only_static_requested_from_t2 = true;
-      for (auto & frame_from_t1 : frames_from_t1) {
-        auto frame_from_t1_it = last_tf_tree.find(frame_from_t1);
-        if (frame_from_t1_it != last_tf_tree.end()) {  // Otherwise frame is TF root (no parent)
-          only_static_requested_from_t1 &= last_tf_tree.at(frame_from_t1).is_static;
-        }
-        for (auto & frame_from_t2 : frames_from_t2) {
-          auto frame_from_t2_it = last_tf_tree.find(frame_from_t2);
-          if (frame_from_t2_it != last_tf_tree.end()) {  // Otherwise frame is TF root (no parent)
-            only_static_requested_from_t2 &= last_tf_tree.at(frame_from_t2).is_static;
-          }
-          if (frame_from_t1 == frame_from_t2) {
-            return {true, only_static_requested_from_t1 && only_static_requested_from_t2};
-          }
-        }
-        only_static_requested_from_t1 = true;
-        only_static_requested_from_t2 = true;
-      }
-    }
-    // Timeout reached
-    return {false, false};
-  };
-
-  std::future<TraverseResult> future =
-    std::async(std::launch::async, traverse, target_frame, source_frame);
-  if (
-    future.wait_for(timeout.to_chrono<std::chrono::milliseconds>()) == std::future_status::ready) {
-    return future.get();
-  }
-  timeout_reached = true;
-  return {false, false};
+  return transformPointcloud(
+    target_frame, cloud_in, cloud_out, tf2_ros::fromRclcpp(time), tf2_ros::fromRclcpp(timeout));
 }
 
-std::optional<TransformStamped> ManagedTransformBuffer::getDynamicTransform(
-  const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
-  const rclcpp::Duration & timeout)
+bool ManagedTransformBuffer::isStatic() const
 {
-  if (!tf_listener_) {
-    activateListener();
-  }
-  return lookupTransform(target_frame, source_frame, time, timeout);
-}
-
-std::optional<TransformStamped> ManagedTransformBuffer::getStaticTransform(
-  const std::string & target_frame, const std::string & source_frame)
-{
-  auto key = std::make_pair(target_frame, source_frame);
-  auto key_inv = std::make_pair(source_frame, target_frame);
-
-  // Check if the transform is already in the buffer
-  auto it = static_tf_buffer_->find(key);
-  if (it != static_tf_buffer_->end()) {
-    auto tf_msg = it->second;
-    tf_msg.header.stamp = node_->now();
-    return std::make_optional<TransformStamped>(tf_msg);
-  }
-
-  // Check if the inverse transform is already in the buffer
-  auto it_inv = static_tf_buffer_->find(key_inv);
-  if (it_inv != static_tf_buffer_->end()) {
-    auto tf_msg = it_inv->second;
-    tf2::Transform tf;
-    tf2::fromMsg(tf_msg.transform, tf);
-    tf2::Transform inv_tf = tf.inverse();
-    TransformStamped inv_tf_msg;
-    inv_tf_msg.transform = tf2::toMsg(inv_tf);
-    inv_tf_msg.header.frame_id = tf_msg.child_frame_id;
-    inv_tf_msg.child_frame_id = tf_msg.header.frame_id;
-    inv_tf_msg.header.stamp = node_->now();
-    static_tf_buffer_->emplace(key, inv_tf_msg);
-    return std::make_optional<TransformStamped>(inv_tf_msg);
-  }
-
-  // Check if transform is needed
-  if (target_frame == source_frame) {
-    auto tf_identity = tf2::Transform::getIdentity();
-    TransformStamped tf_msg;
-    tf_msg.transform = tf2::toMsg(tf_identity);
-    tf_msg.header.frame_id = target_frame;
-    tf_msg.child_frame_id = source_frame;
-    tf_msg.header.stamp = node_->now();
-    static_tf_buffer_->emplace(key, tf_msg);
-    return std::make_optional<TransformStamped>(tf_msg);
-  }
-
-  return std::nullopt;
-}
-
-std::optional<TransformStamped> ManagedTransformBuffer::getUnknownTransform(
-  const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
-  const rclcpp::Duration & timeout)
-{
-  // Try to get transform from local static buffer
-  auto static_tf = getStaticTransform(target_frame, source_frame);
-  if (static_tf.has_value()) {
-    return static_tf;
-  }
-
-  // Initialize local TF listener and base TF listener
-  activateLocalListener();
-  activateListener();
-
-  // Check local TF tree and TF buffer asynchronously
-  std::future<TraverseResult> traverse_future = std::async(
-    std::launch::async, &ManagedTransformBuffer::traverseTree, this, target_frame, source_frame,
-    timeout);
-  std::future<std::optional<TransformStamped>> tf_future = std::async(
-    std::launch::async, &ManagedTransformBuffer::lookupTransform, this, target_frame, source_frame,
-    time, timeout);
-  auto traverse_result = traverse_future.get();
-  auto tf = tf_future.get();
-  deactivateLocalListener();
-
-  // Mimic lookup transform error if TF not exists in tree or buffer
-  if (!traverse_result.success || !tf.has_value()) {
-    return std::nullopt;
-  }
-
-  // If TF is static, add it to the static buffer. Otherwise, switch to dynamic listener
-  if (traverse_result.is_static) {
-    auto key = std::make_pair(target_frame, source_frame);
-    static_tf_buffer_->emplace(key, tf.value());
-    deactivateListener();
-  } else {
-    get_transform_ = [this](
-                       const std::string & target_frame, const std::string & source_frame,
-                       const rclcpp::Time & time,
-                       const rclcpp::Duration & timeout) -> std::optional<TransformStamped> {
-      return getDynamicTransform(target_frame, source_frame, time, timeout);
-    };
-    RCLCPP_DEBUG(
-      node_->get_logger(), "Transform %s -> %s is dynamic. Switching to dynamic listener.",
-      target_frame.c_str(), source_frame.c_str());
-  }
-
-  return tf;
+  return provider_->isStatic();
 }
 
 }  // namespace managed_transform_buffer
