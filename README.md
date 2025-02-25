@@ -50,4 +50,4 @@ ros2 run managed_transform_buffer example_managed_transform_buffer --ros-args -p
 
 ## Limitations
 
-- Requests for dynamic transforms with zero timeout might never succeed. This limitation is due to the fact that the listener is initialized for each transform request (till first occurence of dynamic transform). If timeout is zero, the listener might not have enought time to fill the buffer.
+- Requests for dynamic transforms with zero timeout might never succeed. This limitation is due to the fact that the listener is initialized for each transform request (till first occurrence of dynamic transform). If timeout is zero, the listener might not have enough time to fill the buffer.
