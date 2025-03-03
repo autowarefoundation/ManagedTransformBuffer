@@ -92,8 +92,8 @@ protected:
   void SetUp() override
   {
     node_ = std::make_shared<rclcpp::Node>("test_managed_transform_buffer");
-    managed_tf_buffer_ =
-      std::make_unique<managed_transform_buffer::ManagedTransformBuffer>(node_->get_clock());
+    managed_tf_buffer_ = std::make_unique<managed_transform_buffer::ManagedTransformBuffer>(
+      node_->get_clock()->get_clock_type());
     static_tf_broadcaster_ = std::make_unique<tf2_ros::StaticTransformBroadcaster>(node_);
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
 

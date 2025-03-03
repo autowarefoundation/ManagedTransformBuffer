@@ -24,8 +24,10 @@
 
 #include <tf2_ros/buffer.h>
 
+#include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <random>
 #include <string>
@@ -95,8 +97,8 @@ public:
    * @return the instance of the ManagedTransformBufferProvider
    */
   static ManagedTransformBufferProvider & getInstance(
-    rclcpp::Clock::SharedPtr clock,
-    tf2::Duration cache_time = tf2::Duration(tf2::BUFFER_CORE_DEFAULT_CACHE_TIME));
+    rcl_clock_type_t clock_type, const bool force_dynamic, tf2::Duration discovery_timeout,
+    tf2::Duration cache_time);
 
   ManagedTransformBufferProvider(const ManagedTransformBufferProvider &) = delete;
   ManagedTransformBufferProvider & operator=(const ManagedTransformBufferProvider &) = delete;
@@ -104,11 +106,22 @@ public:
   /** @brief Destroy the Managed Transform Buffer object */
   ~ManagedTransformBufferProvider();
 
+  /**
+   * @brief Get the transform between two frames by frame ID.
+   *
+   * @param[in] target_frame the frame to which data should be transformed
+   * @param[in] source_frame the frame where the data originated
+   * @param[in] time the time at which the value of the transform is desired
+   * @param[in] timeout how long to block before failing
+   * @param[in] logger logger, if not specified, default logger will be used
+   * @return an optional containing the transform if successful, or empty if not
+   */
   std::optional<TransformStamped> getTransform(
     const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
-    const tf2::Duration & timeout);
+    const tf2::Duration & timeout, const rclcpp::Logger & logger);
 
   /** @brief Check if all TFs requests have been for static TF so far.
+   *
    * @return true if only static TFs have been requested
    */
   bool isStatic() const;
@@ -117,12 +130,12 @@ private:
   /**
    * @brief Construct a new Managed Transform Buffer object
    *
-   * @param[in] clock A clock to use for time and sleeping
-   * @param[in] cache_time How long to keep a history of transforms
+   * @param[in] clock_type type of the clock
+   * @param[in] discovery_timeout how long to wait for first TF discovery
+   * @param[in] cache_time how long to keep a history of transforms
    */
   explicit ManagedTransformBufferProvider(
-    rclcpp::Clock::SharedPtr clock,
-    tf2::Duration cache_time = tf2::Duration(tf2::BUFFER_CORE_DEFAULT_CACHE_TIME));
+    rcl_clock_type_t clock_type, tf2::Duration discovery_timeout, tf2::Duration cache_time);
 
   /** @brief Initialize TF listener */
   void activateListener();
@@ -155,34 +168,37 @@ private:
    * @param[in] source_frame the frame where the data originated
    * @param[in] time the time at which the value of the transform is desired (0 will get the latest)
    * @param[in] timeout how long to block before failing
+   * @param[in] logger logger, if not specified, default logger will be used
    * @return an optional containing the transform if successful, or empty if not
    */
   std::optional<TransformStamped> lookupTransform(
     const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
-    const tf2::Duration & timeout) const;
+    const tf2::Duration & timeout, const rclcpp::Logger & logger);
 
   /** @brief Traverse TF tree built by local TF listener.
    *
    * @param[in] target_frame the frame to which data should be transformed
    * @param[in] source_frame the frame where the data originated
    * @param[in] timeout how long to block before failing
+   * @param[in] logger logger, if not specified, default logger will be used
    * @return a traverse result indicating if the transform is possible and if it is static
    */
   TraverseResult traverseTree(
     const std::string & target_frame, const std::string & source_frame,
-    const tf2::Duration & timeout);
+    const tf2::Duration & timeout, const rclcpp::Logger & logger);
 
   /** @brief Get a dynamic transform from the TF buffer.
    *
    * @param[in] target_frame the frame to which data should be transformed
    * @param[in] source_frame the frame where the data originated
    * @param[in] time the time at which the value of the transform is desired (0 will get the latest)
-   * @param[in] timeout how long to block before failing
+   * @param[in] timeout how long to block before
+   * @param[in] logger logger, if not specified, default logger will be used
    * @return an optional containing the transform if successful, or empty if not
    */
   std::optional<TransformStamped> getDynamicTransform(
     const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
-    const tf2::Duration & timeout);
+    const tf2::Duration & timeout, const rclcpp::Logger & logger);
 
   /** @brief Get a static transform from local TF buffer.
    *
@@ -199,11 +215,12 @@ private:
    * @param[in] source_frame the frame where the data originated
    * @param[in] time the time at which the value of the transform is desired (0 will get the latest)
    * @param[in] timeout how long to block before failing
+   * @param[in] logger logger, if not specified, default logger will be used
    * @return an optional containing the transform if successful, or empty if not
    */
   std::optional<TransformStamped> getUnknownTransform(
     const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
-    const tf2::Duration & timeout);
+    const tf2::Duration & timeout, const rclcpp::Logger & logger);
 
   static std::unique_ptr<ManagedTransformBufferProvider> instance;
   rclcpp::Node::SharedPtr node_{nullptr};
@@ -215,7 +232,8 @@ private:
   rclcpp::SubscriptionOptionsWithAllocator<std::allocator<void>> tf_options_;
   rclcpp::SubscriptionOptionsWithAllocator<std::allocator<void>> tf_static_options_;
   std::function<std::optional<TransformStamped>(
-    const std::string &, const std::string &, const tf2::TimePoint &, const tf2::Duration &)>
+    const std::string &, const std::string &, const tf2::TimePoint &, const tf2::Duration &,
+    const rclcpp::Logger &)>
     get_transform_;
   std::function<void(tf2_msgs::msg::TFMessage::SharedPtr)> cb_;
   std::function<void(tf2_msgs::msg::TFMessage::SharedPtr)> cb_static_;
@@ -227,7 +245,9 @@ private:
   std::mt19937 random_engine_;
   std::uniform_int_distribution<> dis_;
   std::mutex mutex_;
-  bool is_static_{true};
+  std::atomic<bool> is_static_{true};
+  tf2::Duration discovery_timeout_;
+  rclcpp::Logger logger_;
 };
 
 }  // namespace managed_transform_buffer
