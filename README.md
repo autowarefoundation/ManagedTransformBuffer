@@ -23,7 +23,7 @@ Library exposes a few handy function for handling TFs and PointCloud2 transforma
 
 ```cpp
 // Create a managed TF buffer
-auto managed_tf_buffer = std::make_unique<ManagedTFBuffer>(this->get_clock());
+auto managed_tf_buffer = std::make_unique<managed_transform_buffer::ManagedTransformBuffer>();
 
 // Get a transform from source_frame to target_frame
 auto tf_msg_transform = managed_tf_buffer->getTransform<geometry_msgs::msg::TransformStamped>("my_target_frame", "my_source_frame", this->now(), rclcpp::Duration::from_seconds(1));
@@ -50,4 +50,8 @@ ros2 run managed_transform_buffer example_managed_transform_buffer --ros-args -p
 
 ## Limitations
 
-- Requests for dynamic transforms with zero timeout might never succeed. This limitation is due to the fact that the listener is initialized for each transform request (till first occurrence of dynamic transform). If timeout is zero, the listener might not have enough time to fill the buffer.
+- Requests for dynamic transforms with zero timeout might never succeed. This limitation is due to the fact that the listener is initialized for each transform request (till first occurrence of dynamic transform). If timeout is zero, the listener will not have enough time to fill the buffer. This can be controlled with `discovery_timeout` parameter for `ManagedTransformBuffer` class constructor. `discovery_timeout` (default: 20ms) is used to set timeout for the first occurrence of any transform:
+
+```cpp
+auto managed_tf_buffer = std::make_unique<managed_transform_buffer::ManagedTransformBuffer>(RCL_ROS_TIME, false, tf2::durationFromSec(0.3));
+```

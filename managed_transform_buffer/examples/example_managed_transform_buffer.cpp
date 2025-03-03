@@ -30,8 +30,7 @@ public:
   {
     target_frame_ = declare_parameter<std::string>("target_frame", "dummy_target_frame");
     source_frame_ = declare_parameter<std::string>("source_frame", "dummy_source_frame");
-    managed_tf_buffer_ =
-      std::make_unique<managed_transform_buffer::ManagedTransformBuffer>(this->get_clock());
+    managed_tf_buffer_ = std::make_unique<managed_transform_buffer::ManagedTransformBuffer>();
     cloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
       "input/cloud", rclcpp::SensorDataQoS(),
       std::bind(&ExampleNode::cloud_cb, this, std::placeholders::_1));

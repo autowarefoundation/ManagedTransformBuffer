@@ -27,6 +27,7 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <tf2_msgs/msg/tf_message.hpp>
 
+#include <chrono>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -34,6 +35,7 @@
 namespace managed_transform_buffer
 {
 using geometry_msgs::msg::TransformStamped;
+constexpr tf2::Duration DISCOVERY_TIMEOUT = tf2::Duration(std::chrono::milliseconds(20));
 
 /**
  * @brief A managed TF buffer that handles listener node lifetime. This buffer triggers listener
@@ -47,11 +49,14 @@ public:
   /**
    * @brief Construct a new Managed Transform Buffer object
    *
-   * @param[in] clock A clock to use for time and sleeping
-   * @param[in] cache_time How long to keep a history of transforms
+   * @param[in] clock_type type of the clock
+   * @param[in] force_dynamic if true, TF listener will be activated during initialization
+   * @param[in] discovery_timeout how long to wait for first TF discovery
+   * @param[in] cache_time how long to keep a history of transforms
    */
   explicit ManagedTransformBuffer(
-    rclcpp::Clock::SharedPtr clock,
+    rcl_clock_type_t clock_type = RCL_ROS_TIME, const bool force_dynamic = false,
+    tf2::Duration discovery_timeout = tf2::Duration(managed_transform_buffer::DISCOVERY_TIMEOUT),
     tf2::Duration cache_time = tf2::Duration(tf2::BUFFER_CORE_DEFAULT_CACHE_TIME));
 
   /** @brief Destroy the Managed Transform Buffer object */
@@ -65,6 +70,7 @@ public:
    * @param[in] source_frame the frame where the data originated
    * @param[in] time the time at which the value of the transform is desired (0 will get the latest)
    * @param[in] timeout how long to block before failing
+   * @param[in] logger logger, if not specified, default logger will be used
    * @return an optional containing the transform if successful, or empty if not
    *
    * @overload getTransform<geometry_msgs::msg::TransformStamped>
@@ -80,17 +86,17 @@ public:
   std::enable_if_t<std::is_same_v<T, TransformStamped>, std::optional<TransformStamped>>
   getTransform(
     const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
-    const tf2::Duration & timeout);
+    const tf2::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
 
   template <typename T = Eigen::Matrix4f>
   std::enable_if_t<std::is_same_v<T, Eigen::Matrix4f>, std::optional<Eigen::Matrix4f>> getTransform(
     const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
-    const tf2::Duration & timeout);
+    const tf2::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
 
   template <typename T = tf2::Transform>
   std::enable_if_t<std::is_same_v<T, tf2::Transform>, std::optional<tf2::Transform>> getTransform(
     const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
-    const tf2::Duration & timeout);
+    const tf2::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
 
   /**
    * @brief Get the transform between two frames by frame ID.
@@ -102,17 +108,53 @@ public:
   std::enable_if_t<std::is_same_v<T, TransformStamped>, std::optional<TransformStamped>>
   getTransform(
     const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
-    const rclcpp::Duration & timeout);
+    const rclcpp::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
 
   template <typename T = Eigen::Matrix4f>
   std::enable_if_t<std::is_same_v<T, Eigen::Matrix4f>, std::optional<Eigen::Matrix4f>> getTransform(
     const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
-    const rclcpp::Duration & timeout);
+    const rclcpp::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
 
   template <typename T = tf2::Transform>
   std::enable_if_t<std::is_same_v<T, tf2::Transform>, std::optional<tf2::Transform>> getTransform(
     const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
-    const rclcpp::Duration & timeout);
+    const rclcpp::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
+
+  /**
+   * @brief Get the latest transform between two frames by frame ID.
+   *
+   * @tparam T the type of the transformation to retrieve
+   * @param[in] target_frame the frame to which data should be transformed
+   * @param[in] source_frame the frame where the data originated
+   * @param[in] logger logger, if not specified, default logger will be used
+   * @return an optional containing the transform if successful, or empty if not
+   *
+   * @overload getTransform<geometry_msgs::msg::TransformStamped>
+   * @return An optional containing the TransformStamped if successful, or empty if not
+   *
+   * @overload getTransform<Eigen::Matrix4f>
+   * @return An optional containing the Eigen::Matrix4f if successful, or empty if not
+   *
+   * @overload getTransform<tf2::Transform>
+   * @return An optional containing the tf2::Transform if successful, or empty if not
+   */
+  template <typename T = TransformStamped>
+  std::enable_if_t<std::is_same_v<T, TransformStamped>, std::optional<TransformStamped>>
+  getLatestTransform(
+    const std::string & target_frame, const std::string & source_frame,
+    const rclcpp::Logger & logger = defaultLogger());
+
+  template <typename T = Eigen::Matrix4f>
+  std::enable_if_t<std::is_same_v<T, Eigen::Matrix4f>, std::optional<Eigen::Matrix4f>>
+  getLatestTransform(
+    const std::string & target_frame, const std::string & source_frame,
+    const rclcpp::Logger & logger = defaultLogger());
+
+  template <typename T = tf2::Transform>
+  std::enable_if_t<std::is_same_v<T, tf2::Transform>, std::optional<tf2::Transform>>
+  getLatestTransform(
+    const std::string & target_frame, const std::string & source_frame,
+    const rclcpp::Logger & logger = defaultLogger());
 
   /**
    * @brief Transforms a point cloud from one frame to another.
@@ -122,12 +164,13 @@ public:
    * @param[out] cloud_out the resultant output point cloud
    * @param[in] time the time at which the value of the transform is desired
    * @param[in] timeout how long to block before failing
+   * @param[in] logger logger, if not specified, default logger will be used
    * @return true if the transformation is successful, false otherwise
    */
   bool transformPointcloud(
     const std::string & target_frame, const sensor_msgs::msg::PointCloud2 & cloud_in,
     sensor_msgs::msg::PointCloud2 & cloud_out, const tf2::TimePoint & time,
-    const tf2::Duration & timeout);
+    const tf2::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
 
   /**
    * @brief Transforms a point cloud from one frame to another.
@@ -138,14 +181,21 @@ public:
   bool transformPointcloud(
     const std::string & target_frame, const sensor_msgs::msg::PointCloud2 & cloud_in,
     sensor_msgs::msg::PointCloud2 & cloud_out, const rclcpp::Time & time,
-    const rclcpp::Duration & timeout);
+    const rclcpp::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
 
   /** @brief Check if all TFs requests have been for static TF so far.
+   *
    * @return true if only static TFs have been requested
    */
   bool isStatic() const;
 
 private:
+  /** @brief Get the default logger.
+   *
+   * @return the default logger
+   */
+  static rclcpp::Logger defaultLogger();
+
   ManagedTransformBufferProvider * provider_;
 };
 

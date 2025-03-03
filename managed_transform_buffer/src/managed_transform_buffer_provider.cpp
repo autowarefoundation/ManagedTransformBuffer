@@ -22,9 +22,9 @@
 
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
+#include <tf2_ros/create_timer_ros.h>
 #include <tf2_ros/transform_listener.h>
 
-#include <atomic>
 #include <cstdint>
 #include <future>
 
@@ -34,27 +34,43 @@ namespace managed_transform_buffer
 std::unique_ptr<ManagedTransformBufferProvider> ManagedTransformBufferProvider::instance = nullptr;
 
 ManagedTransformBufferProvider & ManagedTransformBufferProvider::getInstance(
-  rclcpp::Clock::SharedPtr clock, tf2::Duration cache_time)
+  rcl_clock_type_t clock_type, const bool force_dynamic, tf2::Duration discovery_timeout,
+  tf2::Duration cache_time)
 {
-  static ManagedTransformBufferProvider instance(clock, cache_time);
+  static ManagedTransformBufferProvider instance(clock_type, discovery_timeout, cache_time);
+  if (force_dynamic) {
+    std::lock_guard<std::mutex> lock(instance.mutex_);
+    if (instance.isStatic()) {
+      instance.registerAsDynamic();
+    }
+    if (clock_type != instance.clock_->get_clock_type()) {
+      RCLCPP_WARN_THROTTLE(
+        instance.logger_, *instance.clock_, 3000,
+        "Input clock type does not match (%d vs. %d). Input clock type will be ignored.",
+        clock_type, instance.clock_->get_clock_type());
+    }
+  }
   return instance;
 }
 
 std::optional<TransformStamped> ManagedTransformBufferProvider::getTransform(
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
-  const tf2::Duration & timeout)
+  const tf2::Duration & timeout, const rclcpp::Logger & logger)
 {
-  return get_transform_(target_frame, source_frame, time, timeout);
+  std::lock_guard<std::mutex> lock(mutex_);
+  return get_transform_(target_frame, source_frame, time, timeout, logger);
 }
 
 bool ManagedTransformBufferProvider::isStatic() const
 {
-  return is_static_;
+  return is_static_.load();
 }
 
 ManagedTransformBufferProvider::ManagedTransformBufferProvider(
-  rclcpp::Clock::SharedPtr clock, tf2::Duration cache_time)
-: clock_(clock)
+  rcl_clock_type_t clock_type, tf2::Duration discovery_timeout, tf2::Duration cache_time)
+: clock_(std::make_shared<rclcpp::Clock>(clock_type)),
+  discovery_timeout_(discovery_timeout),
+  logger_(rclcpp::get_logger("ManagedTransformBuffer"))
 {
   executor_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
   executor_thread_ = std::make_shared<std::thread>(
@@ -64,6 +80,7 @@ ManagedTransformBufferProvider::ManagedTransformBufferProvider(
   tf_tree_ = std::make_unique<TreeMap>();
   tf_buffer_ = std::make_unique<tf2_ros::Buffer>(clock_, cache_time);
   tf_buffer_->setUsingDedicatedThread(true);
+
   tf_options_ = tf2_ros::detail::get_default_transform_listener_sub_options();
   tf_static_options_ = tf2_ros::detail::get_default_transform_listener_static_sub_options();
   cb_ = std::bind(&ManagedTransformBufferProvider::tfCallback, this, std::placeholders::_1, false);
@@ -78,7 +95,6 @@ ManagedTransformBufferProvider::ManagedTransformBufferProvider(
 
 ManagedTransformBufferProvider::~ManagedTransformBufferProvider()
 {
-  deactivateListener();
   executor_->cancel();
   if (executor_thread_->joinable()) {
     executor_thread_->join();
@@ -87,9 +103,11 @@ ManagedTransformBufferProvider::~ManagedTransformBufferProvider()
 
 void ManagedTransformBufferProvider::activateListener()
 {
-  std::lock_guard<std::mutex> lock(mutex_);
   options_.arguments({"--ros-args", "-r", "__node:=" + generateUniqueNodeName()});
   node_ = rclcpp::Node::make_unique("_", options_);
+  auto timer_interface = std::make_shared<tf2_ros::CreateTimerROS>(
+    node_->get_node_base_interface(), node_->get_node_timers_interface());
+  tf_buffer_->setCreateTimerInterface(timer_interface);
   callback_group_ =
     node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
   tf_options_.callback_group = callback_group_;
@@ -104,7 +122,6 @@ void ManagedTransformBufferProvider::activateListener()
 
 void ManagedTransformBufferProvider::deactivateListener()
 {
-  std::lock_guard<std::mutex> lock(mutex_);
   auto cb_grps = executor_->get_all_callback_groups();
   for (auto & cb_grp : cb_grps) {
     executor_->remove_callback_group(cb_grp.lock());
@@ -118,23 +135,28 @@ void ManagedTransformBufferProvider::registerAsUnknown()
 {
   get_transform_ = [this](
                      const std::string & target_frame, const std::string & source_frame,
-                     const tf2::TimePoint & time,
-                     const tf2::Duration & timeout) -> std::optional<TransformStamped> {
-    return getUnknownTransform(target_frame, source_frame, time, timeout);
+                     const tf2::TimePoint & time, const tf2::Duration & timeout,
+                     const rclcpp::Logger & logger) -> std::optional<TransformStamped> {
+    // Try to get transform from local static buffer
+    auto static_tf = getStaticTransform(target_frame, source_frame);
+    if (static_tf) return static_tf;
+
+    // Try to discover transform
+    if (!isStatic()) {  // Another thread could switch to dynamic listener
+      return getDynamicTransform(target_frame, source_frame, time, timeout, logger);
+    }
+    return getUnknownTransform(target_frame, source_frame, time, timeout, logger);
   };
 }
 
 void ManagedTransformBufferProvider::registerAsDynamic()
 {
-  is_static_ = false;
+  is_static_.store(false);
   get_transform_ = [this](
                      const std::string & target_frame, const std::string & source_frame,
-                     const tf2::TimePoint & time,
-                     const tf2::Duration & timeout) -> std::optional<TransformStamped> {
-    if (!node_) {
-      activateListener();
-    }
-    return getDynamicTransform(target_frame, source_frame, time, timeout);
+                     const tf2::TimePoint & time, const tf2::Duration & timeout,
+                     const rclcpp::Logger & logger) -> std::optional<TransformStamped> {
+    return getDynamicTransform(target_frame, source_frame, time, timeout, logger);
   };
 }
 
@@ -155,53 +177,51 @@ void ManagedTransformBufferProvider::tfCallback(
       tf_buffer_->setTransform(tf, authority, is_static);
       tf_tree_->emplace(tf.child_frame_id, TreeNode{tf.header.frame_id, is_static});
     } catch (const tf2::TransformException & ex) {
-      if (node_) {
-        RCLCPP_ERROR(
-          node_->get_logger(), "Failure to set received transform from %s to %s with error: %s\n",
-          tf.child_frame_id.c_str(), tf.header.frame_id.c_str(), ex.what());
-      }
+      RCLCPP_ERROR_THROTTLE(
+        logger_, *clock_, 3000, "Failure to set received transform from %s to %s with error: %s\n",
+        tf.child_frame_id.c_str(), tf.header.frame_id.c_str(), ex.what());
     }
   }
 }
 
 std::optional<TransformStamped> ManagedTransformBufferProvider::lookupTransform(
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
-  const tf2::Duration & timeout) const
+  const tf2::Duration & timeout, const rclcpp::Logger & logger)
 {
   try {
+    auto x = node_->get_logger();
     auto tf = tf_buffer_->lookupTransform(target_frame, source_frame, time, timeout);
     return std::make_optional<TransformStamped>(tf);
   } catch (const tf2::TransformException & ex) {
-    if (node_) {
-      RCLCPP_ERROR(
-        node_->get_logger(), "Failure to get transform from %s to %s with error: %s",
-        target_frame.c_str(), source_frame.c_str(), ex.what());
-    }
+    RCLCPP_ERROR_THROTTLE(
+      logger, *clock_, 3000, "Failure to get transform from %s to %s with error: %s",
+      target_frame.c_str(), source_frame.c_str(), ex.what());
     return std::nullopt;
   }
 }
 
 TraverseResult ManagedTransformBufferProvider::traverseTree(
-  const std::string & target_frame, const std::string & source_frame, const tf2::Duration & timeout)
+  const std::string & target_frame, const std::string & source_frame, const tf2::Duration & timeout,
+  const rclcpp::Logger & logger)
 {
   std::atomic<bool> timeout_reached{false};
 
   auto framesToRoot = [this](
-                        const std::string & start_frame, TreeMap & last_tf_tree,
-                        std::vector<std::string> & frames_out) -> bool {
+                        const std::string & start_frame, const TreeMap & tf_tree,
+                        std::vector<std::string> & frames_out,
+                        const rclcpp::Logger & logger) -> bool {
     frames_out.push_back(start_frame);
     uint32_t depth = 0;
     auto current_frame = start_frame;
-    auto frame_it = last_tf_tree.find(current_frame);
-    while (frame_it != last_tf_tree.end()) {
+    auto frame_it = tf_tree.find(current_frame);
+    while (frame_it != tf_tree.end()) {
       current_frame = frame_it->second.parent;
       frames_out.push_back(current_frame);
-      frame_it = last_tf_tree.find(current_frame);
+      frame_it = tf_tree.find(current_frame);
       depth++;
       if (depth > tf2::BufferCore::MAX_GRAPH_DEPTH) {
-        if (node_) {
-          RCLCPP_ERROR(node_->get_logger(), "Traverse depth exceeded for %s", start_frame.c_str());
-        }
+        RCLCPP_ERROR_THROTTLE(
+          logger, *clock_, 3000, "Traverse depth exceeded for %s", start_frame.c_str());
         return false;
       }
     }
@@ -209,16 +229,17 @@ TraverseResult ManagedTransformBufferProvider::traverseTree(
   };
 
   auto traverse = [this, &timeout_reached, &framesToRoot](
-                    const std::string & t1, const std::string & t2) -> TraverseResult {
-    while (!timeout_reached) {
+                    const std::string & t1, const std::string & t2,
+                    const rclcpp::Logger & logger) -> TraverseResult {
+    while (!timeout_reached.load()) {
       std::vector<std::string> frames_from_t1;
       std::vector<std::string> frames_from_t2;
       auto last_tf_tree = *tf_tree_;
 
       // Collect all frames from bottom to the top of TF tree for both frames
       if (
-        !framesToRoot(t1, last_tf_tree, frames_from_t1) ||
-        !framesToRoot(t2, last_tf_tree, frames_from_t2)) {
+        !framesToRoot(t1, last_tf_tree, frames_from_t1, logger) ||
+        !framesToRoot(t2, last_tf_tree, frames_from_t2, logger)) {
         // Possibly TF loop occurred
         return {false, false};
       }
@@ -249,22 +270,19 @@ TraverseResult ManagedTransformBufferProvider::traverseTree(
   };
 
   std::future<TraverseResult> future =
-    std::async(std::launch::async, traverse, target_frame, source_frame);
+    std::async(std::launch::async, traverse, target_frame, source_frame, logger);
   if (future.wait_for(timeout) == std::future_status::ready) {
     return future.get();
   }
-  timeout_reached = true;
+  timeout_reached.store(true);
   return {false, false};
 }
 
 std::optional<TransformStamped> ManagedTransformBufferProvider::getDynamicTransform(
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
-  const tf2::Duration & timeout)
+  const tf2::Duration & timeout, const rclcpp::Logger & logger)
 {
-  if (!node_) {
-    activateListener();
-  }
-  return lookupTransform(target_frame, source_frame, time, timeout);
+  return lookupTransform(target_frame, source_frame, time, timeout, logger);
 }
 
 std::optional<TransformStamped> ManagedTransformBufferProvider::getStaticTransform(
@@ -314,24 +332,19 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getStaticTransfo
 
 std::optional<TransformStamped> ManagedTransformBufferProvider::getUnknownTransform(
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
-  const tf2::Duration & timeout)
+  const tf2::Duration & timeout, const rclcpp::Logger & logger)
 {
-  // Try to get transform from local static buffer
-  auto static_tf = getStaticTransform(target_frame, source_frame);
-  if (static_tf.has_value()) {
-    return static_tf;
-  }
-
   // Initialize local TF listener and base TF listener
   activateListener();
 
   // Check local TF tree and TF buffer asynchronously
+  auto discovery_timeout = std::max(timeout, discovery_timeout_);
   std::future<TraverseResult> traverse_future = std::async(
     std::launch::async, &ManagedTransformBufferProvider::traverseTree, this, target_frame,
-    source_frame, timeout);
+    source_frame, discovery_timeout, logger);
   std::future<std::optional<TransformStamped>> tf_future = std::async(
     std::launch::async, &ManagedTransformBufferProvider::lookupTransform, this, target_frame,
-    source_frame, time, timeout);
+    source_frame, time, discovery_timeout, logger);
   auto traverse_result = traverse_future.get();
   auto tf = tf_future.get();
 
@@ -348,11 +361,9 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getUnknownTransf
     deactivateListener();
   } else {
     registerAsDynamic();
-    if (node_) {
-      RCLCPP_INFO(
-        node_->get_logger(), "Transform %s -> %s is dynamic. Switching to dynamic listener.",
-        target_frame.c_str(), source_frame.c_str());
-    }
+    RCLCPP_INFO_THROTTLE(
+      logger, *clock_, 3000, "Transform %s -> %s is dynamic. Switching to dynamic listener.",
+      target_frame.c_str(), source_frame.c_str());
   }
 
   return tf;
