@@ -42,7 +42,6 @@ std::optional<TransformStamped> ManagedTransformBuffer::getTransform<TransformSt
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
   const tf2::Duration & timeout, const rclcpp::Logger & logger)
 {
-  provider_->getTransform(target_frame, source_frame, time, timeout, logger);
   return provider_->getTransform(target_frame, source_frame, time, timeout, logger);
 }
 

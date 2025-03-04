@@ -173,7 +173,7 @@ private:
    */
   std::optional<TransformStamped> lookupTransform(
     const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
-    const tf2::Duration & timeout, const rclcpp::Logger & logger);
+    const tf2::Duration & timeout, const rclcpp::Logger & logger) const;
 
   /** @brief Traverse TF tree built by local TF listener.
    *
@@ -185,7 +185,7 @@ private:
    */
   TraverseResult traverseTree(
     const std::string & target_frame, const std::string & source_frame,
-    const tf2::Duration & timeout, const rclcpp::Logger & logger);
+    const tf2::Duration & timeout, const rclcpp::Logger & logger) const;
 
   /** @brief Get a dynamic transform from the TF buffer.
    *
@@ -198,7 +198,7 @@ private:
    */
   std::optional<TransformStamped> getDynamicTransform(
     const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
-    const tf2::Duration & timeout, const rclcpp::Logger & logger);
+    const tf2::Duration & timeout, const rclcpp::Logger & logger) const;
 
   /** @brief Get a static transform from local TF buffer.
    *
