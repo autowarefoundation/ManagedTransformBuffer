@@ -48,12 +48,12 @@ ManagedTransformBufferProvider & ManagedTransformBufferProvider::getInstance(
     if (instance.isStatic()) {
       instance.registerAsDynamic();
     }
-    if (clock_type != instance.clock_->get_clock_type()) {
-      RCLCPP_WARN_THROTTLE(
-        instance.logger_, *instance.clock_, 3000,
-        "Input clock type does not match (%d vs. %d). Input clock type will be ignored.",
-        clock_type, instance.clock_->get_clock_type());
-    }
+  }
+  if (clock_type != instance.clock_->get_clock_type()) {
+    RCLCPP_WARN_THROTTLE(
+      instance.logger_, *instance.clock_, 3000,
+      "Input clock type does not match (%d vs. %d). Input clock type will be ignored.", clock_type,
+      instance.clock_->get_clock_type());
   }
   return instance;
 }
@@ -191,10 +191,9 @@ void ManagedTransformBufferProvider::tfCallback(
 
 std::optional<TransformStamped> ManagedTransformBufferProvider::lookupTransform(
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
-  const tf2::Duration & timeout, const rclcpp::Logger & logger)
+  const tf2::Duration & timeout, const rclcpp::Logger & logger) const
 {
   try {
-    auto x = node_->get_logger();
     auto tf = tf_buffer_->lookupTransform(target_frame, source_frame, time, timeout);
     return std::make_optional<TransformStamped>(tf);
   } catch (const tf2::TransformException & ex) {
@@ -207,7 +206,7 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::lookupTransform(
 
 TraverseResult ManagedTransformBufferProvider::traverseTree(
   const std::string & target_frame, const std::string & source_frame, const tf2::Duration & timeout,
-  const rclcpp::Logger & logger)
+  const rclcpp::Logger & logger) const
 {
   std::atomic<bool> timeout_reached{false};
 
@@ -285,7 +284,7 @@ TraverseResult ManagedTransformBufferProvider::traverseTree(
 
 std::optional<TransformStamped> ManagedTransformBufferProvider::getDynamicTransform(
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
-  const tf2::Duration & timeout, const rclcpp::Logger & logger)
+  const tf2::Duration & timeout, const rclcpp::Logger & logger) const
 {
   return lookupTransform(target_frame, source_frame, time, timeout, logger);
 }
