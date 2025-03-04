@@ -22,6 +22,8 @@
 
 #include <pcl_conversions/pcl_conversions.h>
 
+#include <string>
+
 namespace managed_transform_buffer
 {
 

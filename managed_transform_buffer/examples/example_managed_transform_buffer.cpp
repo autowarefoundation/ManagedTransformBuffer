@@ -22,6 +22,7 @@
 
 #include <chrono>
 #include <memory>
+#include <string>
 
 class ExampleNode : public rclcpp::Node
 {

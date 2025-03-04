@@ -25,8 +25,13 @@
 #include <tf2_ros/create_timer_ros.h>
 #include <tf2_ros/transform_listener.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <future>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace managed_transform_buffer
 {
