@@ -131,7 +131,8 @@ bool ManagedTransformBuffer::transformPointcloud(
 {
   if (
     pcl::getFieldIndex(cloud_in, "x") == -1 || pcl::getFieldIndex(cloud_in, "y") == -1 ||
-    pcl::getFieldIndex(cloud_in, "z") == -1) {
+    pcl::getFieldIndex(cloud_in, "z") == -1 || target_frame.empty() ||
+    cloud_in.header.frame_id.empty() || cloud_in.data.empty()) {
     return false;
   }
   if (target_frame == cloud_in.header.frame_id) {
