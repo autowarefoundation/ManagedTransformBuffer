@@ -25,11 +25,13 @@
 #include <tf2_ros/buffer.h>
 
 #include <atomic>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <random>
+#include <shared_mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -185,7 +187,7 @@ private:
    */
   TraverseResult traverseTree(
     const std::string & target_frame, const std::string & source_frame,
-    const tf2::Duration & timeout, const rclcpp::Logger & logger) const;
+    const tf2::Duration & timeout, const rclcpp::Logger & logger);
 
   /** @brief Get a dynamic transform from the TF buffer.
    *
@@ -244,8 +246,11 @@ private:
   std::unique_ptr<TreeMap> tf_tree_;
   std::mt19937 random_engine_;
   std::uniform_int_distribution<> dis_;
-  std::mutex mutex_;
+  std::shared_mutex buffer_mutex_;
+  std::shared_mutex tree_mutex_;
+  std::mutex listener_mutex_;
   std::atomic<bool> is_static_{true};
+  std::atomic<std::size_t> operational_threads_{0};
   tf2::Duration discovery_timeout_;
   rclcpp::Logger logger_;
 };

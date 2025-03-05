@@ -44,8 +44,10 @@ ManagedTransformBufferProvider & ManagedTransformBufferProvider::getInstance(
 {
   static ManagedTransformBufferProvider instance(clock_type, discovery_timeout, cache_time);
   if (force_dynamic) {
-    std::lock_guard<std::mutex> lock(instance.mutex_);
     if (instance.isStatic()) {
+      std::lock_guard<std::mutex> listener_lock(instance.listener_mutex_);
+      std::unique_lock<std::shared_mutex> unq_buffer_lock(instance.buffer_mutex_);
+      std::unique_lock<std::shared_mutex> unq_tree_lock(instance.tree_mutex_);
       instance.registerAsDynamic();
     }
   }
@@ -62,7 +64,6 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getTransform(
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
   const tf2::Duration & timeout, const rclcpp::Logger & logger)
 {
-  std::lock_guard<std::mutex> lock(mutex_);
   return get_transform_(target_frame, source_frame, time, timeout, logger);
 }
 
@@ -108,6 +109,9 @@ ManagedTransformBufferProvider::~ManagedTransformBufferProvider()
 
 void ManagedTransformBufferProvider::activateListener()
 {
+  std::lock_guard<std::mutex> listener_lock(listener_mutex_);
+  operational_threads_.fetch_add(1);
+  if (operational_threads_.load() != 1) return;
   options_.arguments({"--ros-args", "-r", "__node:=" + generateUniqueNodeName()});
   node_ = rclcpp::Node::make_unique("_", options_);
   auto timer_interface = std::make_shared<tf2_ros::CreateTimerROS>(
@@ -127,6 +131,9 @@ void ManagedTransformBufferProvider::activateListener()
 
 void ManagedTransformBufferProvider::deactivateListener()
 {
+  std::lock_guard<std::mutex> listener_lock(listener_mutex_);
+  operational_threads_.fetch_sub(1);
+  if (operational_threads_.load() != 0) return;
   auto cb_grps = executor_->get_all_callback_groups();
   for (auto & cb_grp : cb_grps) {
     executor_->remove_callback_group(cb_grp.lock());
@@ -138,6 +145,8 @@ void ManagedTransformBufferProvider::deactivateListener()
 
 void ManagedTransformBufferProvider::registerAsUnknown()
 {
+  std::lock_guard<std::mutex> listener_lock(listener_mutex_);
+  is_static_.store(true);
   get_transform_ = [this](
                      const std::string & target_frame, const std::string & source_frame,
                      const tf2::TimePoint & time, const tf2::Duration & timeout,
@@ -156,6 +165,7 @@ void ManagedTransformBufferProvider::registerAsUnknown()
 
 void ManagedTransformBufferProvider::registerAsDynamic()
 {
+  std::lock_guard<std::mutex> listener_lock(listener_mutex_);
   is_static_.store(false);
   get_transform_ = [this](
                      const std::string & target_frame, const std::string & source_frame,
@@ -180,7 +190,9 @@ void ManagedTransformBufferProvider::tfCallback(
   for (const auto & tf : msg->transforms) {
     try {
       tf_buffer_->setTransform(tf, authority, is_static);
+      std::unique_lock<std::shared_mutex> unq_tree_lock(tree_mutex_);
       tf_tree_->emplace(tf.child_frame_id, TreeNode{tf.header.frame_id, is_static});
+      unq_tree_lock.unlock();
     } catch (const tf2::TransformException & ex) {
       RCLCPP_ERROR_THROTTLE(
         logger_, *clock_, 3000, "Failure to set received transform from %s to %s with error: %s\n",
@@ -206,7 +218,7 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::lookupTransform(
 
 TraverseResult ManagedTransformBufferProvider::traverseTree(
   const std::string & target_frame, const std::string & source_frame, const tf2::Duration & timeout,
-  const rclcpp::Logger & logger) const
+  const rclcpp::Logger & logger)
 {
   std::atomic<bool> timeout_reached{false};
 
@@ -238,7 +250,9 @@ TraverseResult ManagedTransformBufferProvider::traverseTree(
     while (!timeout_reached.load()) {
       std::vector<std::string> frames_from_t1;
       std::vector<std::string> frames_from_t2;
+      std::shared_lock<std::shared_mutex> sh_tree_lock(tree_mutex_);
       auto last_tf_tree = *tf_tree_;
+      sh_tree_lock.unlock();
 
       // Collect all frames from bottom to the top of TF tree for both frames
       if (
@@ -292,6 +306,8 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getDynamicTransf
 std::optional<TransformStamped> ManagedTransformBufferProvider::getStaticTransform(
   const std::string & target_frame, const std::string & source_frame)
 {
+  std::shared_lock<std::shared_mutex> sh_buffer_lock(buffer_mutex_);
+
   auto key = std::make_pair(target_frame, source_frame);
   auto key_inv = std::make_pair(source_frame, target_frame);
 
@@ -315,6 +331,8 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getStaticTransfo
     inv_tf_msg.header.frame_id = tf_msg.child_frame_id;
     inv_tf_msg.child_frame_id = tf_msg.header.frame_id;
     inv_tf_msg.header.stamp = clock_->now();
+    sh_buffer_lock.unlock();
+    std::unique_lock<std::shared_mutex> unq_buffer_lock(buffer_mutex_);
     static_tf_buffer_->emplace(key, inv_tf_msg);
     return std::make_optional<TransformStamped>(inv_tf_msg);
   }
@@ -327,6 +345,8 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getStaticTransfo
     tf_msg.header.frame_id = target_frame;
     tf_msg.child_frame_id = source_frame;
     tf_msg.header.stamp = clock_->now();
+    sh_buffer_lock.unlock();
+    std::unique_lock<std::shared_mutex> unq_buffer_lock(buffer_mutex_);
     static_tf_buffer_->emplace(key, tf_msg);
     return std::make_optional<TransformStamped>(tf_msg);
   }
@@ -361,7 +381,9 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getUnknownTransf
   // If TF is static, add it to the static buffer. Otherwise, switch to dynamic listener
   if (traverse_result.is_static) {
     auto key = std::make_pair(target_frame, source_frame);
+    std::unique_lock<std::shared_mutex> unq_buffer_lock(buffer_mutex_);
     static_tf_buffer_->emplace(key, tf.value());
+    unq_buffer_lock.unlock();
     deactivateListener();
   } else {
     registerAsDynamic();
