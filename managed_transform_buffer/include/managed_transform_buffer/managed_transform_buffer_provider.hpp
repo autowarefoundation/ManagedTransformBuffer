@@ -181,13 +181,12 @@ private:
    *
    * @param[in] target_frame the frame to which data should be transformed
    * @param[in] source_frame the frame where the data originated
-   * @param[in] timeout how long to block before failing
    * @param[in] logger logger, if not specified, default logger will be used
    * @return a traverse result indicating if the transform is possible and if it is static
    */
   TraverseResult traverseTree(
     const std::string & target_frame, const std::string & source_frame,
-    const tf2::Duration & timeout, const rclcpp::Logger & logger);
+    const rclcpp::Logger & logger);
 
   /** @brief Get a dynamic transform from the TF buffer.
    *
