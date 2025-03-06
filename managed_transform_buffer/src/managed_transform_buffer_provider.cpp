@@ -27,7 +27,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <future>
 #include <memory>
 #include <string>
 #include <utility>
@@ -217,11 +216,8 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::lookupTransform(
 }
 
 TraverseResult ManagedTransformBufferProvider::traverseTree(
-  const std::string & target_frame, const std::string & source_frame, const tf2::Duration & timeout,
-  const rclcpp::Logger & logger)
+  const std::string & target_frame, const std::string & source_frame, const rclcpp::Logger & logger)
 {
-  std::atomic<bool> timeout_reached{false};
-
   auto framesToRoot = [this](
                         const std::string & start_frame, const TreeMap & tf_tree,
                         std::vector<std::string> & frames_out,
@@ -244,55 +240,42 @@ TraverseResult ManagedTransformBufferProvider::traverseTree(
     return true;
   };
 
-  auto traverse = [this, &timeout_reached, &framesToRoot](
-                    const std::string & t1, const std::string & t2,
-                    const rclcpp::Logger & logger) -> TraverseResult {
-    while (!timeout_reached.load()) {
-      std::vector<std::string> frames_from_t1;
-      std::vector<std::string> frames_from_t2;
-      std::shared_lock<std::shared_mutex> sh_tree_lock(tree_mutex_);
-      auto last_tf_tree = *tf_tree_;
-      sh_tree_lock.unlock();
+  std::vector<std::string> frames_from_t1;
+  std::vector<std::string> frames_from_t2;
+  std::shared_lock<std::shared_mutex> sh_tree_lock(tree_mutex_);
+  auto last_tf_tree = *tf_tree_;
+  sh_tree_lock.unlock();
 
-      // Collect all frames from bottom to the top of TF tree for both frames
-      if (
-        !framesToRoot(t1, last_tf_tree, frames_from_t1, logger) ||
-        !framesToRoot(t2, last_tf_tree, frames_from_t2, logger)) {
-        // Possibly TF loop occurred
-        return {false, false};
+  // Collect all frames from bottom to the top of TF tree for both frames
+  if (
+    !framesToRoot(target_frame, last_tf_tree, frames_from_t1, logger) ||
+    !framesToRoot(source_frame, last_tf_tree, frames_from_t2, logger)) {
+    // Possibly TF loop occurred
+    return {false, false};
+  }
+
+  // Find common ancestor
+  bool only_static_requested_from_t1 = true;
+  bool only_static_requested_from_t2 = true;
+  for (auto & frame_from_t1 : frames_from_t1) {
+    auto frame_from_t1_it = last_tf_tree.find(frame_from_t1);
+    if (frame_from_t1_it != last_tf_tree.end()) {  // Otherwise frame is TF root (no parent)
+      only_static_requested_from_t1 &= last_tf_tree.at(frame_from_t1).is_static;
+    }
+    for (auto & frame_from_t2 : frames_from_t2) {
+      auto frame_from_t2_it = last_tf_tree.find(frame_from_t2);
+      if (frame_from_t2_it != last_tf_tree.end()) {  // Otherwise frame is TF root (no parent)
+        only_static_requested_from_t2 &= last_tf_tree.at(frame_from_t2).is_static;
       }
-
-      // Find common ancestor
-      bool only_static_requested_from_t1 = true;
-      bool only_static_requested_from_t2 = true;
-      for (auto & frame_from_t1 : frames_from_t1) {
-        auto frame_from_t1_it = last_tf_tree.find(frame_from_t1);
-        if (frame_from_t1_it != last_tf_tree.end()) {  // Otherwise frame is TF root (no parent)
-          only_static_requested_from_t1 &= last_tf_tree.at(frame_from_t1).is_static;
-        }
-        for (auto & frame_from_t2 : frames_from_t2) {
-          auto frame_from_t2_it = last_tf_tree.find(frame_from_t2);
-          if (frame_from_t2_it != last_tf_tree.end()) {  // Otherwise frame is TF root (no parent)
-            only_static_requested_from_t2 &= last_tf_tree.at(frame_from_t2).is_static;
-          }
-          if (frame_from_t1 == frame_from_t2) {
-            return {true, only_static_requested_from_t1 && only_static_requested_from_t2};
-          }
-        }
-        only_static_requested_from_t1 = true;
-        only_static_requested_from_t2 = true;
+      if (frame_from_t1 == frame_from_t2) {
+        return {true, only_static_requested_from_t1 && only_static_requested_from_t2};
       }
     }
-    // Timeout reached
-    return {false, false};
-  };
-
-  std::future<TraverseResult> future =
-    std::async(std::launch::async, traverse, target_frame, source_frame, logger);
-  if (future.wait_for(timeout) == std::future_status::ready) {
-    return future.get();
+    only_static_requested_from_t1 = true;
+    only_static_requested_from_t2 = true;
   }
-  timeout_reached.store(true);
+
+  // No common ancestor found
   return {false, false};
 }
 
@@ -358,22 +341,20 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getUnknownTransf
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
   const tf2::Duration & timeout, const rclcpp::Logger & logger)
 {
-  // Initialize local TF listener and base TF listener
+  // Initialize TF listener
   activateListener();
 
-  // Check local TF tree and TF buffer asynchronously
+  // Check TF buffer
   auto discovery_timeout = std::max(timeout, discovery_timeout_);
-  std::future<TraverseResult> traverse_future = std::async(
-    std::launch::async, &ManagedTransformBufferProvider::traverseTree, this, target_frame,
-    source_frame, discovery_timeout, logger);
-  std::future<std::optional<TransformStamped>> tf_future = std::async(
-    std::launch::async, &ManagedTransformBufferProvider::lookupTransform, this, target_frame,
-    source_frame, time, discovery_timeout, logger);
-  auto traverse_result = traverse_future.get();
-  auto tf = tf_future.get();
+  auto tf = lookupTransform(target_frame, source_frame, time, discovery_timeout, logger);
+  if (!tf.has_value()) {
+    deactivateListener();
+    return std::nullopt;
+  }
 
-  // Mimic lookup transform error if TF not exists in tree or buffer
-  if (!traverse_result.success || !tf.has_value()) {
+  // Check whether TF is static
+  auto traverse_result = traverseTree(target_frame, source_frame, logger);
+  if (!traverse_result.success) {
     deactivateListener();
     return std::nullopt;
   }
