@@ -20,6 +20,8 @@
 
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
+#include <Eigen/src/Geometry/Transform.h>
+#include <pcl/common/io.h>
 #include <pcl_conversions/pcl_conversions.h>
 
 #include <string>
@@ -46,20 +48,6 @@ std::optional<TransformStamped> ManagedTransformBuffer::getTransform<TransformSt
 }
 
 template <>
-std::optional<Eigen::Matrix4f> ManagedTransformBuffer::getTransform<Eigen::Matrix4f>(
-  const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
-  const tf2::Duration & timeout, const rclcpp::Logger & logger)
-{
-  auto tf = provider_->getTransform(target_frame, source_frame, time, timeout, logger);
-  if (!tf.has_value()) {
-    return std::nullopt;
-  }
-  Eigen::Matrix4f eigen_transform;
-  pcl_ros::transformAsMatrix(tf.value(), eigen_transform);
-  return std::make_optional<Eigen::Matrix4f>(eigen_transform);
-}
-
-template <>
 std::optional<tf2::Transform> ManagedTransformBuffer::getTransform<tf2::Transform>(
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
   const tf2::Duration & timeout, const rclcpp::Logger & logger)
@@ -68,9 +56,103 @@ std::optional<tf2::Transform> ManagedTransformBuffer::getTransform<tf2::Transfor
   if (!tf.has_value()) {
     return std::nullopt;
   }
+
   tf2::Transform tf2_transform;
   tf2::fromMsg(tf.value().transform, tf2_transform);
+
   return std::make_optional<tf2::Transform>(tf2_transform);
+}
+
+template <>
+std::optional<Eigen::Affine3f> ManagedTransformBuffer::getTransform<Eigen::Affine3f>(
+  const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+  const tf2::Duration & timeout, const rclcpp::Logger & logger)
+{
+  auto tf = provider_->getTransform(target_frame, source_frame, time, timeout, logger);
+  if (!tf.has_value()) {
+    return std::nullopt;
+  }
+
+  Eigen::Vector3f translation(
+    static_cast<float>(tf->transform.translation.x),
+    static_cast<float>(tf->transform.translation.y),
+    static_cast<float>(tf->transform.translation.z));
+  Eigen::Quaternionf rotation(
+    static_cast<float>(tf->transform.rotation.w), static_cast<float>(tf->transform.rotation.x),
+    static_cast<float>(tf->transform.rotation.y), static_cast<float>(tf->transform.rotation.z));
+  Eigen::Affine3f eigen_transform = Eigen::Translation3f(translation) * rotation;
+
+  return std::make_optional<Eigen::Affine3f>(eigen_transform);
+}
+
+template <>
+std::optional<Eigen::Affine3d> ManagedTransformBuffer::getTransform<Eigen::Affine3d>(
+  const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+  const tf2::Duration & timeout, const rclcpp::Logger & logger)
+{
+  auto tf = provider_->getTransform(target_frame, source_frame, time, timeout, logger);
+  if (!tf.has_value()) {
+    return std::nullopt;
+  }
+
+  Eigen::Vector3d translation(
+    tf->transform.translation.x, tf->transform.translation.y, tf->transform.translation.z);
+  Eigen::Quaterniond rotation(
+    tf->transform.rotation.w, tf->transform.rotation.x, tf->transform.rotation.y,
+    tf->transform.rotation.z);
+  Eigen::Affine3d eigen_transform = Eigen::Translation3d(translation) * rotation;
+
+  return std::make_optional<Eigen::Affine3d>(eigen_transform);
+}
+
+template <>
+std::optional<Eigen::Matrix4f> ManagedTransformBuffer::getTransform<Eigen::Matrix4f>(
+  const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+  const tf2::Duration & timeout, const rclcpp::Logger & logger)
+{
+  auto tf = provider_->getTransform(target_frame, source_frame, time, timeout, logger);
+  if (!tf.has_value()) {
+    return std::nullopt;
+  }
+
+  Eigen::Vector3f translation(
+    static_cast<float>(tf->transform.translation.x),
+    static_cast<float>(tf->transform.translation.y),
+    static_cast<float>(tf->transform.translation.z));
+  Eigen::Quaternionf rotation(
+    static_cast<float>(tf->transform.rotation.w), static_cast<float>(tf->transform.rotation.x),
+    static_cast<float>(tf->transform.rotation.y), static_cast<float>(tf->transform.rotation.z));
+  Eigen::Matrix3f rotation_matrix = rotation.toRotationMatrix();
+  Eigen::Matrix4f eigen_transform = Eigen::Matrix4f::Identity();
+  static_assert(!Eigen::Matrix4f::IsRowMajor, "Matrices should be column major.");
+  eigen_transform.block<3, 3>(0, 0) = rotation_matrix;
+  eigen_transform.block<3, 1>(0, 3) = translation;
+
+  return std::make_optional<Eigen::Matrix4f>(eigen_transform);
+}
+
+template <>
+std::optional<Eigen::Matrix4d> ManagedTransformBuffer::getTransform<Eigen::Matrix4d>(
+  const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+  const tf2::Duration & timeout, const rclcpp::Logger & logger)
+{
+  auto tf = provider_->getTransform(target_frame, source_frame, time, timeout, logger);
+  if (!tf.has_value()) {
+    return std::nullopt;
+  }
+
+  Eigen::Vector3d translation(
+    tf->transform.translation.x, tf->transform.translation.y, tf->transform.translation.z);
+  Eigen::Quaterniond rotation(
+    tf->transform.rotation.w, tf->transform.rotation.x, tf->transform.rotation.y,
+    tf->transform.rotation.z);
+  Eigen::Matrix3d rotation_matrix = rotation.toRotationMatrix();
+  Eigen::Matrix4d eigen_transform = Eigen::Matrix4d::Identity();
+  static_assert(!Eigen::Matrix4d::IsRowMajor, "Matrices should be column major.");
+  eigen_transform.block<3, 3>(0, 0) = rotation_matrix;
+  eigen_transform.block<3, 1>(0, 3) = translation;
+
+  return std::make_optional<Eigen::Matrix4d>(eigen_transform);
 }
 
 template <>
@@ -83,6 +165,33 @@ std::optional<TransformStamped> ManagedTransformBuffer::getTransform<TransformSt
 }
 
 template <>
+std::optional<tf2::Transform> ManagedTransformBuffer::getTransform<tf2::Transform>(
+  const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
+  const rclcpp::Duration & timeout, const rclcpp::Logger & logger)
+{
+  return getTransform<tf2::Transform>(
+    target_frame, source_frame, tf2_ros::fromRclcpp(time), tf2_ros::fromRclcpp(timeout), logger);
+}
+
+template <>
+std::optional<Eigen::Affine3f> ManagedTransformBuffer::getTransform<Eigen::Affine3f>(
+  const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
+  const rclcpp::Duration & timeout, const rclcpp::Logger & logger)
+{
+  return getTransform<Eigen::Affine3f>(
+    target_frame, source_frame, tf2_ros::fromRclcpp(time), tf2_ros::fromRclcpp(timeout), logger);
+}
+
+template <>
+std::optional<Eigen::Affine3d> ManagedTransformBuffer::getTransform<Eigen::Affine3d>(
+  const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
+  const rclcpp::Duration & timeout, const rclcpp::Logger & logger)
+{
+  return getTransform<Eigen::Affine3d>(
+    target_frame, source_frame, tf2_ros::fromRclcpp(time), tf2_ros::fromRclcpp(timeout), logger);
+}
+
+template <>
 std::optional<Eigen::Matrix4f> ManagedTransformBuffer::getTransform<Eigen::Matrix4f>(
   const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
   const rclcpp::Duration & timeout, const rclcpp::Logger & logger)
@@ -92,11 +201,11 @@ std::optional<Eigen::Matrix4f> ManagedTransformBuffer::getTransform<Eigen::Matri
 }
 
 template <>
-std::optional<tf2::Transform> ManagedTransformBuffer::getTransform<tf2::Transform>(
+std::optional<Eigen::Matrix4d> ManagedTransformBuffer::getTransform<Eigen::Matrix4d>(
   const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
   const rclcpp::Duration & timeout, const rclcpp::Logger & logger)
 {
-  return getTransform<tf2::Transform>(
+  return getTransform<Eigen::Matrix4d>(
     target_frame, source_frame, tf2_ros::fromRclcpp(time), tf2_ros::fromRclcpp(timeout), logger);
 }
 
@@ -109,6 +218,30 @@ std::optional<TransformStamped> ManagedTransformBuffer::getLatestTransform<Trans
 }
 
 template <>
+std::optional<tf2::Transform> ManagedTransformBuffer::getLatestTransform<tf2::Transform>(
+  const std::string & target_frame, const std::string & source_frame, const rclcpp::Logger & logger)
+{
+  return getTransform<tf2::Transform>(
+    target_frame, source_frame, tf2::TimePointZero, tf2::Duration::zero(), logger);
+}
+
+template <>
+std::optional<Eigen::Affine3f> ManagedTransformBuffer::getLatestTransform<Eigen::Affine3f>(
+  const std::string & target_frame, const std::string & source_frame, const rclcpp::Logger & logger)
+{
+  return getTransform<Eigen::Affine3f>(
+    target_frame, source_frame, tf2::TimePointZero, tf2::Duration::zero(), logger);
+}
+
+template <>
+std::optional<Eigen::Affine3d> ManagedTransformBuffer::getLatestTransform<Eigen::Affine3d>(
+  const std::string & target_frame, const std::string & source_frame, const rclcpp::Logger & logger)
+{
+  return getTransform<Eigen::Affine3d>(
+    target_frame, source_frame, tf2::TimePointZero, tf2::Duration::zero(), logger);
+}
+
+template <>
 std::optional<Eigen::Matrix4f> ManagedTransformBuffer::getLatestTransform<Eigen::Matrix4f>(
   const std::string & target_frame, const std::string & source_frame, const rclcpp::Logger & logger)
 {
@@ -117,10 +250,10 @@ std::optional<Eigen::Matrix4f> ManagedTransformBuffer::getLatestTransform<Eigen:
 }
 
 template <>
-std::optional<tf2::Transform> ManagedTransformBuffer::getLatestTransform<tf2::Transform>(
+std::optional<Eigen::Matrix4d> ManagedTransformBuffer::getLatestTransform<Eigen::Matrix4d>(
   const std::string & target_frame, const std::string & source_frame, const rclcpp::Logger & logger)
 {
-  return getTransform<tf2::Transform>(
+  return getTransform<Eigen::Matrix4d>(
     target_frame, source_frame, tf2::TimePointZero, tf2::Duration::zero(), logger);
 }
 
@@ -149,10 +282,47 @@ bool ManagedTransformBuffer::transformPointcloud(
   return true;
 }
 
+template <typename PointT>
+bool ManagedTransformBuffer::transformPointcloud(
+  const std::string & target_frame, const pcl::PointCloud<PointT> & cloud_in,
+  pcl::PointCloud<PointT> & cloud_out, const tf2::TimePoint & time, const tf2::Duration & timeout,
+  const rclcpp::Logger & logger)
+{
+  if (
+    pcl::getFieldIndex(cloud_in, "x") == -1 || pcl::getFieldIndex(cloud_in, "y") == -1 ||
+    pcl::getFieldIndex(cloud_in, "z") == -1 || target_frame.empty() ||
+    cloud_in.header.frame_id.empty() || cloud_in.empty()) {
+    return false;
+  }
+  if (target_frame == cloud_in.header.frame_id) {
+    cloud_out = cloud_in;
+    return true;
+  }
+  auto eigen_transform =
+    getTransform<Eigen::Matrix4f>(target_frame, cloud_in.header.frame_id, time, timeout, logger);
+  if (!eigen_transform.has_value()) {
+    return false;
+  }
+  pcl_ros::transformPointCloud(eigen_transform.value(), cloud_in, cloud_out);
+  cloud_out.header.frame_id = target_frame;
+  return true;
+}
+
 bool ManagedTransformBuffer::transformPointcloud(
   const std::string & target_frame, const sensor_msgs::msg::PointCloud2 & cloud_in,
   sensor_msgs::msg::PointCloud2 & cloud_out, const rclcpp::Time & time,
   const rclcpp::Duration & timeout, const rclcpp::Logger & logger)
+{
+  return transformPointcloud(
+    target_frame, cloud_in, cloud_out, tf2_ros::fromRclcpp(time), tf2_ros::fromRclcpp(timeout),
+    logger);
+}
+
+template <typename PointT>
+bool ManagedTransformBuffer::transformPointcloud(
+  const std::string & target_frame, const pcl::PointCloud<PointT> & cloud_in,
+  pcl::PointCloud<PointT> & cloud_out, const rclcpp::Time & time, const rclcpp::Duration & timeout,
+  const rclcpp::Logger & logger)
 {
   return transformPointcloud(
     target_frame, cloud_in, cloud_out, tf2_ros::fromRclcpp(time), tf2_ros::fromRclcpp(timeout),
