@@ -20,12 +20,16 @@
 #include "managed_transform_buffer/managed_transform_buffer_provider.hpp"
 
 #include <eigen3/Eigen/Core>
+#include <eigen3/Eigen/Geometry>
 #include <rclcpp/rclcpp.hpp>
+#include <tf2/LinearMath/Quaternion.hpp>
 #include <tf2/LinearMath/Transform.hpp>
 
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <tf2_msgs/msg/tf_message.hpp>
+
+#include <pcl/point_cloud.h>
 
 #include <chrono>
 #include <optional>
@@ -76,15 +80,39 @@ public:
    * @overload getTransform<geometry_msgs::msg::TransformStamped>
    * @return An optional containing the TransformStamped if successful, or empty if not
    *
+   * @overload getTransform<tf2::Transform>
+   * @return An optional containing the tf2::Transform if successful, or empty if not
+   *
+   * @overload getTransform<Eigen::Affine3f>
+   * @return An optional containing the Eigen::Affine3f if successful, or empty if not
+   *
+   * @overload getTransform<Eigen::Affine3d>
+   * @return An optional containing the Eigen::Affine3d if successful, or empty if not
+   *
    * @overload getTransform<Eigen::Matrix4f>
    * @return An optional containing the Eigen::Matrix4f if successful, or empty if not
    *
-   * @overload getTransform<tf2::Transform>
-   * @return An optional containing the tf2::Transform if successful, or empty if not
+   * @overload getTransform<Eigen::Matrix4d>
+   * @return An optional containing the Eigen::Matrix4d if successful, or empty if not
    */
   template <typename T = TransformStamped>
   std::enable_if_t<std::is_same_v<T, TransformStamped>, std::optional<TransformStamped>>
   getTransform(
+    const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+    const tf2::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
+
+  template <typename T = tf2::Transform>
+  std::enable_if_t<std::is_same_v<T, tf2::Transform>, std::optional<tf2::Transform>> getTransform(
+    const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+    const tf2::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
+
+  template <typename T = Eigen::Affine3f>
+  std::enable_if_t<std::is_same_v<T, Eigen::Affine3f>, std::optional<Eigen::Affine3f>> getTransform(
+    const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
+    const tf2::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
+
+  template <typename T = Eigen::Affine3d>
+  std::enable_if_t<std::is_same_v<T, Eigen::Affine3d>, std::optional<Eigen::Affine3d>> getTransform(
     const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
     const tf2::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
 
@@ -93,8 +121,8 @@ public:
     const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
     const tf2::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
 
-  template <typename T = tf2::Transform>
-  std::enable_if_t<std::is_same_v<T, tf2::Transform>, std::optional<tf2::Transform>> getTransform(
+  template <typename T = Eigen::Matrix4d>
+  std::enable_if_t<std::is_same_v<T, Eigen::Matrix4d>, std::optional<Eigen::Matrix4d>> getTransform(
     const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
     const tf2::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
 
@@ -110,13 +138,28 @@ public:
     const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
     const rclcpp::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
 
+  template <typename T = tf2::Transform>
+  std::enable_if_t<std::is_same_v<T, tf2::Transform>, std::optional<tf2::Transform>> getTransform(
+    const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
+    const rclcpp::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
+
+  template <typename T = Eigen::Affine3f>
+  std::enable_if_t<std::is_same_v<T, Eigen::Affine3f>, std::optional<Eigen::Affine3f>> getTransform(
+    const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
+    const rclcpp::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
+
+  template <typename T = Eigen::Affine3d>
+  std::enable_if_t<std::is_same_v<T, Eigen::Affine3d>, std::optional<Eigen::Affine3d>> getTransform(
+    const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
+    const rclcpp::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
+
   template <typename T = Eigen::Matrix4f>
   std::enable_if_t<std::is_same_v<T, Eigen::Matrix4f>, std::optional<Eigen::Matrix4f>> getTransform(
     const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
     const rclcpp::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
 
-  template <typename T = tf2::Transform>
-  std::enable_if_t<std::is_same_v<T, tf2::Transform>, std::optional<tf2::Transform>> getTransform(
+  template <typename T = Eigen::Matrix4d>
+  std::enable_if_t<std::is_same_v<T, Eigen::Matrix4d>, std::optional<Eigen::Matrix4d>> getTransform(
     const std::string & target_frame, const std::string & source_frame, const rclcpp::Time & time,
     const rclcpp::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
 
@@ -132,14 +175,41 @@ public:
    * @overload getTransform<geometry_msgs::msg::TransformStamped>
    * @return An optional containing the TransformStamped if successful, or empty if not
    *
+   * @overload getTransform<tf2::Transform>
+   * @return An optional containing the tf2::Transform if successful, or empty if not
+   *
+   * @overload getTransform<Eigen::Affine3f>
+   * @return An optional containing the Eigen::Affine3f if successful, or empty if not
+   *
+   * @overload getTransform<Eigen::Affine3d>
+   * @return An optional containing the Eigen::Affine3d if successful, or empty if not
+   *
    * @overload getTransform<Eigen::Matrix4f>
    * @return An optional containing the Eigen::Matrix4f if successful, or empty if not
    *
-   * @overload getTransform<tf2::Transform>
-   * @return An optional containing the tf2::Transform if successful, or empty if not
+   * @overload getTransform<Eigen::Matrix4d>
+   * @return An optional containing the Eigen::Matrix4d if successful, or empty if not
    */
   template <typename T = TransformStamped>
   std::enable_if_t<std::is_same_v<T, TransformStamped>, std::optional<TransformStamped>>
+  getLatestTransform(
+    const std::string & target_frame, const std::string & source_frame,
+    const rclcpp::Logger & logger = defaultLogger());
+
+  template <typename T = tf2::Transform>
+  std::enable_if_t<std::is_same_v<T, tf2::Transform>, std::optional<tf2::Transform>>
+  getLatestTransform(
+    const std::string & target_frame, const std::string & source_frame,
+    const rclcpp::Logger & logger = defaultLogger());
+
+  template <typename T = Eigen::Affine3f>
+  std::enable_if_t<std::is_same_v<T, Eigen::Affine3f>, std::optional<Eigen::Affine3f>>
+  getLatestTransform(
+    const std::string & target_frame, const std::string & source_frame,
+    const rclcpp::Logger & logger = defaultLogger());
+
+  template <typename T = Eigen::Affine3d>
+  std::enable_if_t<std::is_same_v<T, Eigen::Affine3d>, std::optional<Eigen::Affine3d>>
   getLatestTransform(
     const std::string & target_frame, const std::string & source_frame,
     const rclcpp::Logger & logger = defaultLogger());
@@ -150,8 +220,8 @@ public:
     const std::string & target_frame, const std::string & source_frame,
     const rclcpp::Logger & logger = defaultLogger());
 
-  template <typename T = tf2::Transform>
-  std::enable_if_t<std::is_same_v<T, tf2::Transform>, std::optional<tf2::Transform>>
+  template <typename T = Eigen::Matrix4d>
+  std::enable_if_t<std::is_same_v<T, Eigen::Matrix4d>, std::optional<Eigen::Matrix4d>>
   getLatestTransform(
     const std::string & target_frame, const std::string & source_frame,
     const rclcpp::Logger & logger = defaultLogger());
@@ -178,9 +248,33 @@ public:
    * @sa transformPointcloud(const std::string &, const sensor_msgs::msg::PointCloud2 &,
    * sensor_msgs::msg::PointCloud2 &, const tf2::TimePoint &, const tf2::Duration)
    */
+  template <typename PointT>
+  bool transformPointcloud(
+    const std::string & target_frame, const pcl::PointCloud<PointT> & cloud_in,
+    pcl::PointCloud<PointT> & cloud_out, const tf2::TimePoint & time, const tf2::Duration & timeout,
+    const rclcpp::Logger & logger = defaultLogger());
+
+  /**
+   * @brief Transforms a point cloud from one frame to another.
+   *
+   * @sa transformPointcloud(const std::string &, const sensor_msgs::msg::PointCloud2 &,
+   * sensor_msgs::msg::PointCloud2 &, const tf2::TimePoint &, const tf2::Duration)
+   */
   bool transformPointcloud(
     const std::string & target_frame, const sensor_msgs::msg::PointCloud2 & cloud_in,
     sensor_msgs::msg::PointCloud2 & cloud_out, const rclcpp::Time & time,
+    const rclcpp::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
+
+  /**
+   * @brief Transforms a point cloud from one frame to another.
+   *
+   * @sa transformPointcloud(const std::string &, const sensor_msgs::msg::PointCloud2 &,
+   * sensor_msgs::msg::PointCloud2 &, const rclcpp::Time &, const rclcpp::Duration)
+   */
+  template <typename PointT>
+  bool transformPointcloud(
+    const std::string & target_frame, const pcl::PointCloud<PointT> & cloud_in,
+    pcl::PointCloud<PointT> & cloud_out, const rclcpp::Time & time,
     const rclcpp::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
 
   /** @brief Check if all TFs requests have been for static TF so far.

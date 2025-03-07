@@ -4,8 +4,12 @@
   <name>managed_transform_buffer</name>
   <version>0.1.0</version>
   <description>The managed_transform_buffer package</description>
+
   <maintainer email="amadeusz.szymko.2@tier4.jp">Amadeusz Szymko</maintainer>
+
   <license>Apache License 2.0</license>
+
+  <author email="amadeusz.szymko.2@tier4.jp">Amadeusz Szymko</author>
 
   <buildtool_depend>ament_cmake_auto</buildtool_depend>
 
