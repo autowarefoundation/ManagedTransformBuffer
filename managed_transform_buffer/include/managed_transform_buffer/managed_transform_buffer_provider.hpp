@@ -145,11 +145,17 @@ private:
   /** @brief Deactivate TF listener */
   void deactivateListener();
 
-  /** @brief Register TF buffer as unknown. */
-  void registerAsUnknown();
+  /** @brief Register TF buffer as unknown
+   *
+   * @return true if successful, false otherwise
+   */
+  bool registerAsUnknown();
 
-  /** @brief Register TF buffer as dynamic. */
-  void registerAsDynamic();
+  /** @brief Register TF buffer as dynamic
+   *
+   * @return true if successful, false otherwise
+   */
+  bool registerAsDynamic();
 
   /** @brief Generate a unique node name
    *
