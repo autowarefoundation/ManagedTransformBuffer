@@ -142,7 +142,7 @@ void ManagedTransformBufferProvider::deactivateListener()
   node_.reset();
 }
 
-void ManagedTransformBufferProvider::registerAsUnknown()
+bool ManagedTransformBufferProvider::registerAsUnknown()
 {
   std::lock_guard<std::mutex> listener_lock(listener_mutex_);
   is_static_.store(true);
@@ -155,16 +155,15 @@ void ManagedTransformBufferProvider::registerAsUnknown()
     if (static_tf) return static_tf;
 
     // Try to discover transform
-    if (!isStatic()) {  // Another thread could switch to dynamic listener
-      return getDynamicTransform(target_frame, source_frame, time, timeout, logger);
-    }
     return getUnknownTransform(target_frame, source_frame, time, timeout, logger);
   };
+  return true;
 }
 
-void ManagedTransformBufferProvider::registerAsDynamic()
+bool ManagedTransformBufferProvider::registerAsDynamic()
 {
   std::lock_guard<std::mutex> listener_lock(listener_mutex_);
+  if (!isStatic()) return false;  // Already dynamic
   is_static_.store(false);
   get_transform_ = [this](
                      const std::string & target_frame, const std::string & source_frame,
@@ -172,6 +171,7 @@ void ManagedTransformBufferProvider::registerAsDynamic()
                      const rclcpp::Logger & logger) -> std::optional<TransformStamped> {
     return getDynamicTransform(target_frame, source_frame, time, timeout, logger);
   };
+  return true;
 }
 
 std::string ManagedTransformBufferProvider::generateUniqueNodeName()
@@ -189,9 +189,15 @@ void ManagedTransformBufferProvider::tfCallback(
   for (const auto & tf : msg->transforms) {
     try {
       tf_buffer_->setTransform(tf, authority, is_static);
-      std::unique_lock<std::shared_mutex> unq_tree_lock(tree_mutex_);
-      tf_tree_->emplace(tf.child_frame_id, TreeNode{tf.header.frame_id, is_static});
-      unq_tree_lock.unlock();
+      if (isStatic()) {  // Only static TF listener needs TF tree
+        std::shared_lock<std::shared_mutex> sh_tree_lock(tree_mutex_);
+        auto tree_it = tf_tree_->find(tf.child_frame_id);
+        if (tree_it == tf_tree_->end()) {
+          sh_tree_lock.unlock();
+          std::unique_lock<std::shared_mutex> unq_tree_lock(tree_mutex_);
+          tf_tree_->emplace(tf.child_frame_id, TreeNode{tf.header.frame_id, is_static});
+        }
+      }
     } catch (const tf2::TransformException & ex) {
       RCLCPP_ERROR_THROTTLE(
         logger_, *clock_, 3000, "Failure to set received transform from %s to %s with error: %s\n",
@@ -291,10 +297,8 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getStaticTransfo
 {
   std::shared_lock<std::shared_mutex> sh_buffer_lock(buffer_mutex_);
 
-  auto key = std::make_pair(target_frame, source_frame);
-  auto key_inv = std::make_pair(source_frame, target_frame);
-
   // Check if the transform is already in the buffer
+  auto key = std::make_pair(target_frame, source_frame);
   auto it = static_tf_buffer_->find(key);
   if (it != static_tf_buffer_->end()) {
     auto tf_msg = it->second;
@@ -303,6 +307,7 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getStaticTransfo
   }
 
   // Check if the inverse transform is already in the buffer
+  auto key_inv = std::make_pair(source_frame, target_frame);
   auto it_inv = static_tf_buffer_->find(key_inv);
   if (it_inv != static_tf_buffer_->end()) {
     auto tf_msg = it_inv->second;
@@ -367,10 +372,11 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getUnknownTransf
     unq_buffer_lock.unlock();
     deactivateListener();
   } else {
-    registerAsDynamic();
-    RCLCPP_INFO_THROTTLE(
-      logger, *clock_, 3000, "Transform %s -> %s is dynamic. Switching to dynamic listener.",
-      target_frame.c_str(), source_frame.c_str());
+    if (registerAsDynamic()) {
+      RCLCPP_INFO(
+        logger, "Transform %s -> %s is dynamic. Switching to dynamic listener.",
+        target_frame.c_str(), source_frame.c_str());
+    }
   }
 
   return tf;
