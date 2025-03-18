@@ -211,10 +211,12 @@ private:
    *
    * @param[in] target_frame the frame to which data should be transformed
    * @param[in] source_frame the frame where the data originated
+   * @param[in] time the time to be assigned to static transform
    * @return an optional containing the transform if successful, or empty if not
    */
   std::optional<TransformStamped> getStaticTransform(
-    const std::string & target_frame, const std::string & source_frame);
+    const std::string & target_frame, const std::string & source_frame,
+    const tf2::TimePoint & time);
 
   /** @brief Get an unknown (static or dynamic) transform.
    *
