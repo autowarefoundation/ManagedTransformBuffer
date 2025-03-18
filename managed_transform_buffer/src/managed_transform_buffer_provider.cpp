@@ -151,7 +151,7 @@ bool ManagedTransformBufferProvider::registerAsUnknown()
                      const tf2::TimePoint & time, const tf2::Duration & timeout,
                      const rclcpp::Logger & logger) -> std::optional<TransformStamped> {
     // Try to get transform from local static buffer
-    auto static_tf = getStaticTransform(target_frame, source_frame);
+    auto static_tf = getStaticTransform(target_frame, source_frame, time);
     if (static_tf) return static_tf;
 
     // Try to discover transform
@@ -293,7 +293,7 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getDynamicTransf
 }
 
 std::optional<TransformStamped> ManagedTransformBufferProvider::getStaticTransform(
-  const std::string & target_frame, const std::string & source_frame)
+  const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time)
 {
   std::shared_lock<std::shared_mutex> sh_buffer_lock(buffer_mutex_);
 
@@ -302,7 +302,7 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getStaticTransfo
   auto it = static_tf_buffer_->find(key);
   if (it != static_tf_buffer_->end()) {
     auto tf_msg = it->second;
-    tf_msg.header.stamp = clock_->now();
+    tf_msg.header.stamp = tf2_ros::toRclcpp(time);
     return std::make_optional<TransformStamped>(tf_msg);
   }
 
@@ -318,7 +318,7 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getStaticTransfo
     inv_tf_msg.transform = tf2::toMsg(inv_tf);
     inv_tf_msg.header.frame_id = tf_msg.child_frame_id;
     inv_tf_msg.child_frame_id = tf_msg.header.frame_id;
-    inv_tf_msg.header.stamp = clock_->now();
+    inv_tf_msg.header.stamp = tf2_ros::toRclcpp(time);
     sh_buffer_lock.unlock();
     std::unique_lock<std::shared_mutex> unq_buffer_lock(buffer_mutex_);
     static_tf_buffer_->emplace(key, inv_tf_msg);
@@ -332,7 +332,7 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getStaticTransfo
     tf_msg.transform = tf2::toMsg(tf_identity);
     tf_msg.header.frame_id = target_frame;
     tf_msg.child_frame_id = source_frame;
-    tf_msg.header.stamp = clock_->now();
+    tf_msg.header.stamp = tf2_ros::toRclcpp(time);
     sh_buffer_lock.unlock();
     std::unique_lock<std::shared_mutex> unq_buffer_lock(buffer_mutex_);
     static_tf_buffer_->emplace(key, tf_msg);
