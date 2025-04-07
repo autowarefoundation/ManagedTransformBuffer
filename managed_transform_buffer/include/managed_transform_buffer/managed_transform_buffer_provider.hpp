@@ -127,6 +127,12 @@ public:
    */
   bool isStatic() const;
 
+  /** @brief Get clock.
+   *
+   * @return the clock
+   */
+  rclcpp::Clock::SharedPtr getClock() const;
+
 private:
   /**
    * @brief Construct a new Managed Transform Buffer object

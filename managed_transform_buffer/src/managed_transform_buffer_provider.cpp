@@ -74,6 +74,11 @@ bool ManagedTransformBufferProvider::isStatic() const
   return is_static_.load();
 }
 
+rclcpp::Clock::SharedPtr ManagedTransformBufferProvider::getClock() const
+{
+  return clock_;
+}
+
 ManagedTransformBufferProvider::ManagedTransformBufferProvider(
   rcl_clock_type_t clock_type, tf2::Duration discovery_timeout, tf2::Duration cache_time)
 : clock_(std::make_shared<rclcpp::Clock>(clock_type)),

@@ -263,8 +263,22 @@ bool ManagedTransformBuffer::transformPointcloud(
 {
   if (
     pcl::getFieldIndex(cloud_in, "x") == -1 || pcl::getFieldIndex(cloud_in, "y") == -1 ||
-    pcl::getFieldIndex(cloud_in, "z") == -1 || target_frame.empty() ||
-    cloud_in.header.frame_id.empty() || cloud_in.data.empty()) {
+    pcl::getFieldIndex(cloud_in, "z") == -1) {
+    RCLCPP_ERROR_THROTTLE(
+      logger, *provider_.getClock(), 3000,
+      "Cloud does not contain x, y, z fields. Cannot transform.");
+    return false;
+  }
+  if (target_frame.empty() || cloud_in.header.frame_id.empty()) {
+    RCLCPP_ERROR_THROTTLE(
+      logger, *provider_.getClock(), 3000,
+      "Target frame (%s) or source frame (%s) is empty. Cannot transform.", target_frame.c_str(),
+      cloud_in.header.frame_id.c_str());
+    return false;
+  }
+  if (cloud_in.data.empty()) {
+    RCLCPP_ERROR_THROTTLE(
+      logger, *provider_.getClock(), 3000, "Input cloud is empty. Cannot transform.");
     return false;
   }
   if (target_frame == cloud_in.header.frame_id) {
@@ -289,8 +303,22 @@ bool ManagedTransformBuffer::transformPointcloud(
 {
   if (
     pcl::getFieldIndex(cloud_in, "x") == -1 || pcl::getFieldIndex(cloud_in, "y") == -1 ||
-    pcl::getFieldIndex(cloud_in, "z") == -1 || target_frame.empty() ||
-    cloud_in.header.frame_id.empty() || cloud_in.empty()) {
+    pcl::getFieldIndex(cloud_in, "z") == -1) {
+    RCLCPP_ERROR_THROTTLE(
+      logger, *provider_.getClock(), 3000,
+      "Cloud does not contain x, y, z fields. Cannot transform.");
+    return false;
+  }
+  if (target_frame.empty() || cloud_in.header.frame_id.empty()) {
+    RCLCPP_ERROR_THROTTLE(
+      logger, *provider_.getClock(), 3000,
+      "Target frame (%s) or source frame (%s) is empty. Cannot transform.", target_frame.c_str(),
+      cloud_in.header.frame_id.c_str());
+    return false;
+  }
+  if (cloud_in.data.empty()) {
+    RCLCPP_ERROR_THROTTLE(
+      logger, *provider_.getClock(), 3000, "Input cloud is empty. Cannot transform.");
     return false;
   }
   if (target_frame == cloud_in.header.frame_id) {
