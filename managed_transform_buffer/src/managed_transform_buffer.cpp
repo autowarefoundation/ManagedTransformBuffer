@@ -37,8 +37,6 @@ ManagedTransformBuffer::ManagedTransformBuffer(
     clock_type, force_dynamic, discovery_timeout, cache_time);
 }
 
-ManagedTransformBuffer::~ManagedTransformBuffer() = default;
-
 template <>
 std::optional<TransformStamped> ManagedTransformBuffer::getTransform<TransformStamped>(
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,

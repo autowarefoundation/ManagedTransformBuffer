@@ -64,7 +64,7 @@ public:
     tf2::Duration cache_time = tf2::Duration(tf2::BUFFER_CORE_DEFAULT_CACHE_TIME));
 
   /** @brief Destroy the Managed Transform Buffer object */
-  ~ManagedTransformBuffer();
+  ~ManagedTransformBuffer() = default;
 
   /**
    * @brief Get the transform between two frames by frame ID.
