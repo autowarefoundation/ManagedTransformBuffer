@@ -39,7 +39,7 @@
 namespace managed_transform_buffer
 {
 using geometry_msgs::msg::TransformStamped;
-constexpr tf2::Duration DISCOVERY_TIMEOUT = tf2::Duration(std::chrono::milliseconds(20));
+constexpr tf2::Duration DISCOVERY_TIMEOUT = std::chrono::milliseconds(20);
 
 /**
  * @brief A managed TF buffer that handles listener node lifetime. This buffer triggers listener
