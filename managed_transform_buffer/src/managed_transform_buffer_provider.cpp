@@ -35,8 +35,6 @@
 namespace managed_transform_buffer
 {
 
-std::unique_ptr<ManagedTransformBufferProvider> ManagedTransformBufferProvider::instance = nullptr;
-
 ManagedTransformBufferProvider & ManagedTransformBufferProvider::getInstance(
   rcl_clock_type_t clock_type, const bool force_dynamic, tf2::Duration discovery_timeout,
   tf2::Duration cache_time)
