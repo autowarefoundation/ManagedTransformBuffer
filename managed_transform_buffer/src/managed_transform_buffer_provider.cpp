@@ -76,7 +76,7 @@ ManagedTransformBufferProvider::ManagedTransformBufferProvider(
   rcl_clock_type_t clock_type, tf2::Duration discovery_timeout, tf2::Duration cache_time)
 : clock_(std::make_shared<rclcpp::Clock>(clock_type)),
   discovery_timeout_(discovery_timeout),
-  logger_(rclcpp::get_logger("ManagedTransformBuffer"))
+  logger_(rclcpp::get_logger("managed_transform_buffer"))
 {
   executor_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
   executor_thread_ = std::make_shared<std::thread>(

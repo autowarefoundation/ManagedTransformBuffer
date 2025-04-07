@@ -336,7 +336,7 @@ bool ManagedTransformBuffer::isStatic() const
 
 rclcpp::Logger ManagedTransformBuffer::defaultLogger()
 {
-  return rclcpp::get_logger("ManagedTransformBuffer");
+  return rclcpp::get_logger("managed_transform_buffer");
 }
 
 }  // namespace managed_transform_buffer
