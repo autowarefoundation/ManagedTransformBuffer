@@ -26,7 +26,6 @@
 
 #include <atomic>
 #include <cstddef>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -145,18 +144,6 @@ private:
   /** @brief Deactivate TF listener */
   void deactivateListener();
 
-  /** @brief Register TF buffer as unknown
-   *
-   * @return true if successful, false otherwise
-   */
-  bool registerAsUnknown();
-
-  /** @brief Register TF buffer as dynamic
-   *
-   * @return true if successful, false otherwise
-   */
-  bool registerAsDynamic();
-
   /** @brief Generate a unique node name
    *
    * @return a unique node name
@@ -240,10 +227,6 @@ private:
   rclcpp::Subscription<tf2_msgs::msg::TFMessage>::SharedPtr tf_sub_{nullptr};
   rclcpp::SubscriptionOptionsWithAllocator<std::allocator<void>> tf_options_;
   rclcpp::SubscriptionOptionsWithAllocator<std::allocator<void>> tf_static_options_;
-  std::function<std::optional<TransformStamped>(
-    const std::string &, const std::string &, const tf2::TimePoint &, const tf2::Duration &,
-    const rclcpp::Logger &)>
-    get_transform_;
   std::function<void(tf2_msgs::msg::TFMessage::SharedPtr)> cb_;
   std::function<void(tf2_msgs::msg::TFMessage::SharedPtr)> cb_static_;
   std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> executor_{nullptr};
@@ -255,7 +238,6 @@ private:
   std::uniform_int_distribution<> dis_;
   std::shared_mutex buffer_mutex_;
   std::shared_mutex tree_mutex_;
-  std::shared_mutex fn_def_mutex_;
   std::mutex listener_mutex_;
   std::atomic<bool> is_static_{true};
   std::atomic<std::size_t> operational_threads_{0};

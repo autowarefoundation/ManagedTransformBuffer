@@ -32,8 +32,9 @@ namespace managed_transform_buffer
 ManagedTransformBuffer::ManagedTransformBuffer(
   rcl_clock_type_t clock_type, const bool force_dynamic, tf2::Duration discovery_timeout,
   tf2::Duration cache_time)
-: provider_(ManagedTransformBufferProvider::getInstance(
-    clock_type, force_dynamic, discovery_timeout, cache_time))
+: provider_(
+    ManagedTransformBufferProvider::getInstance(
+      clock_type, force_dynamic, discovery_timeout, cache_time))
 {
 }
 
