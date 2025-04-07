@@ -63,6 +63,7 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getTransform(
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
   const tf2::Duration & timeout, const rclcpp::Logger & logger)
 {
+  std::shared_lock<std::shared_mutex> sh_fn_def_lock(fn_def_mutex_);
   return get_transform_(target_frame, source_frame, time, timeout, logger);
 }
 
@@ -145,6 +146,7 @@ void ManagedTransformBufferProvider::deactivateListener()
 bool ManagedTransformBufferProvider::registerAsUnknown()
 {
   std::lock_guard<std::mutex> listener_lock(listener_mutex_);
+  std::unique_lock<std::shared_mutex> unq_fn_def_lock(fn_def_mutex_);
   is_static_.store(true);
   get_transform_ = [this](
                      const std::string & target_frame, const std::string & source_frame,
@@ -163,6 +165,7 @@ bool ManagedTransformBufferProvider::registerAsUnknown()
 bool ManagedTransformBufferProvider::registerAsDynamic()
 {
   std::lock_guard<std::mutex> listener_lock(listener_mutex_);
+  std::unique_lock<std::shared_mutex> unq_fn_def_lock(fn_def_mutex_);
   if (!isStatic()) return false;  // Already dynamic
   is_static_.store(false);
   get_transform_ = [this](

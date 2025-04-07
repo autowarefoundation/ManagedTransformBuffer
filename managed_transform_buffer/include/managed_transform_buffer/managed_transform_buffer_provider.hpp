@@ -255,6 +255,7 @@ private:
   std::uniform_int_distribution<> dis_;
   std::shared_mutex buffer_mutex_;
   std::shared_mutex tree_mutex_;
+  std::shared_mutex fn_def_mutex_;
   std::mutex listener_mutex_;
   std::atomic<bool> is_static_{true};
   std::atomic<std::size_t> operational_threads_{0};
