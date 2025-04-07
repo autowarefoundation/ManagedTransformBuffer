@@ -225,10 +225,10 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::lookupTransform(
 TraverseResult ManagedTransformBufferProvider::traverseTree(
   const std::string & target_frame, const std::string & source_frame, const rclcpp::Logger & logger)
 {
-  auto framesToRoot = [this](
-                        const std::string & start_frame, const TreeMap & tf_tree,
-                        std::vector<std::string> & frames_out,
-                        const rclcpp::Logger & logger) -> bool {
+  auto frames_to_root = [this](
+                          const std::string & start_frame, const TreeMap & tf_tree,
+                          std::vector<std::string> & frames_out,
+                          const rclcpp::Logger & logger) -> bool {
     frames_out.push_back(start_frame);
     uint32_t depth = 0;
     auto current_frame = start_frame;
@@ -255,8 +255,8 @@ TraverseResult ManagedTransformBufferProvider::traverseTree(
 
   // Collect all frames from bottom to the top of TF tree for both frames
   if (
-    !framesToRoot(target_frame, last_tf_tree, frames_from_t1, logger) ||
-    !framesToRoot(source_frame, last_tf_tree, frames_from_t2, logger)) {
+    !frames_to_root(target_frame, last_tf_tree, frames_from_t1, logger) ||
+    !frames_to_root(source_frame, last_tf_tree, frames_from_t2, logger)) {
     // Possibly TF loop occurred
     return {false, false};
   }
