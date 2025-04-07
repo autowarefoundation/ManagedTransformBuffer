@@ -290,7 +290,7 @@ private:
    */
   static rclcpp::Logger defaultLogger();
 
-  ManagedTransformBufferProvider * provider_;
+  ManagedTransformBufferProvider & provider_;
 };
 
 }  // namespace managed_transform_buffer
