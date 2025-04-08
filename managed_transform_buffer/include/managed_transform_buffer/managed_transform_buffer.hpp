@@ -39,7 +39,7 @@
 namespace managed_transform_buffer
 {
 using geometry_msgs::msg::TransformStamped;
-constexpr tf2::Duration DISCOVERY_TIMEOUT = tf2::Duration(std::chrono::milliseconds(20));
+constexpr tf2::Duration DISCOVERY_TIMEOUT = std::chrono::milliseconds(20);
 
 /**
  * @brief A managed TF buffer that handles listener node lifetime. This buffer triggers listener
@@ -64,7 +64,7 @@ public:
     tf2::Duration cache_time = tf2::Duration(tf2::BUFFER_CORE_DEFAULT_CACHE_TIME));
 
   /** @brief Destroy the Managed Transform Buffer object */
-  ~ManagedTransformBuffer();
+  ~ManagedTransformBuffer() = default;
 
   /**
    * @brief Get the transform between two frames by frame ID.
@@ -290,7 +290,7 @@ private:
    */
   static rclcpp::Logger defaultLogger();
 
-  ManagedTransformBufferProvider * provider_;
+  ManagedTransformBufferProvider & provider_;
 };
 
 }  // namespace managed_transform_buffer

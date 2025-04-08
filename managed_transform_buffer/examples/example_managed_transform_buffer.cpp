@@ -34,10 +34,10 @@ public:
     managed_tf_buffer_ = std::make_unique<managed_transform_buffer::ManagedTransformBuffer>();
     cloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
       "input/cloud", rclcpp::SensorDataQoS(),
-      std::bind(&ExampleNode::cloud_cb, this, std::placeholders::_1));
+      std::bind(&ExampleNode::cloudCb, this, std::placeholders::_1));
     cloud_pub_ =
       create_publisher<sensor_msgs::msg::PointCloud2>("output/cloud", rclcpp::SensorDataQoS());
-    timer_ = create_wall_timer(std::chrono::seconds(1), std::bind(&ExampleNode::timer_cb, this));
+    timer_ = create_wall_timer(std::chrono::seconds(1), std::bind(&ExampleNode::timerCb, this));
   }
 
 private:
@@ -48,7 +48,7 @@ private:
   std::string target_frame_;
   std::string source_frame_;
 
-  void cloud_cb(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+  void cloudCb(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
   {
     sensor_msgs::msg::PointCloud2 transformed_cloud;
     if (managed_tf_buffer_->transformPointcloud(
@@ -58,7 +58,7 @@ private:
     }
   }
 
-  void timer_cb()
+  void timerCb()
   {
     auto tf = managed_tf_buffer_->getTransform<Eigen::Matrix4f>(
       target_frame_, source_frame_, this->now(), rclcpp::Duration::from_seconds(1));

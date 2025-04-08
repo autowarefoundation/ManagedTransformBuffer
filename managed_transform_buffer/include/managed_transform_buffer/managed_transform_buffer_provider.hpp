@@ -26,7 +26,6 @@
 
 #include <atomic>
 #include <cstddef>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -128,6 +127,12 @@ public:
    */
   bool isStatic() const;
 
+  /** @brief Get clock.
+   *
+   * @return the clock
+   */
+  rclcpp::Clock::SharedPtr getClock() const;
+
 private:
   /**
    * @brief Construct a new Managed Transform Buffer object
@@ -144,18 +149,6 @@ private:
 
   /** @brief Deactivate TF listener */
   void deactivateListener();
-
-  /** @brief Register TF buffer as unknown
-   *
-   * @return true if successful, false otherwise
-   */
-  bool registerAsUnknown();
-
-  /** @brief Register TF buffer as dynamic
-   *
-   * @return true if successful, false otherwise
-   */
-  bool registerAsDynamic();
 
   /** @brief Generate a unique node name
    *
@@ -240,10 +233,6 @@ private:
   rclcpp::Subscription<tf2_msgs::msg::TFMessage>::SharedPtr tf_sub_{nullptr};
   rclcpp::SubscriptionOptionsWithAllocator<std::allocator<void>> tf_options_;
   rclcpp::SubscriptionOptionsWithAllocator<std::allocator<void>> tf_static_options_;
-  std::function<std::optional<TransformStamped>(
-    const std::string &, const std::string &, const tf2::TimePoint &, const tf2::Duration &,
-    const rclcpp::Logger &)>
-    get_transform_;
   std::function<void(tf2_msgs::msg::TFMessage::SharedPtr)> cb_;
   std::function<void(tf2_msgs::msg::TFMessage::SharedPtr)> cb_static_;
   std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> executor_{nullptr};

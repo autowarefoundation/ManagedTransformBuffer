@@ -35,8 +35,6 @@
 namespace managed_transform_buffer
 {
 
-std::unique_ptr<ManagedTransformBufferProvider> ManagedTransformBufferProvider::instance = nullptr;
-
 ManagedTransformBufferProvider & ManagedTransformBufferProvider::getInstance(
   rcl_clock_type_t clock_type, const bool force_dynamic, tf2::Duration discovery_timeout,
   tf2::Duration cache_time)
@@ -47,7 +45,7 @@ ManagedTransformBufferProvider & ManagedTransformBufferProvider::getInstance(
       std::lock_guard<std::mutex> listener_lock(instance.listener_mutex_);
       std::unique_lock<std::shared_mutex> unq_buffer_lock(instance.buffer_mutex_);
       std::unique_lock<std::shared_mutex> unq_tree_lock(instance.tree_mutex_);
-      instance.registerAsDynamic();
+      instance.is_static_.store(false);
     }
   }
   if (clock_type != instance.clock_->get_clock_type()) {
@@ -63,7 +61,12 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getTransform(
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
   const tf2::Duration & timeout, const rclcpp::Logger & logger)
 {
-  return get_transform_(target_frame, source_frame, time, timeout, logger);
+  if (isStatic()) {
+    auto static_tf = getStaticTransform(target_frame, source_frame, time);
+    if (static_tf) return static_tf;
+    return getUnknownTransform(target_frame, source_frame, time, timeout, logger);
+  }
+  return getDynamicTransform(target_frame, source_frame, time, timeout, logger);
 }
 
 bool ManagedTransformBufferProvider::isStatic() const
@@ -71,11 +74,16 @@ bool ManagedTransformBufferProvider::isStatic() const
   return is_static_.load();
 }
 
+rclcpp::Clock::SharedPtr ManagedTransformBufferProvider::getClock() const
+{
+  return clock_;
+}
+
 ManagedTransformBufferProvider::ManagedTransformBufferProvider(
   rcl_clock_type_t clock_type, tf2::Duration discovery_timeout, tf2::Duration cache_time)
 : clock_(std::make_shared<rclcpp::Clock>(clock_type)),
   discovery_timeout_(discovery_timeout),
-  logger_(rclcpp::get_logger("ManagedTransformBuffer"))
+  logger_(rclcpp::get_logger("managed_transform_buffer"))
 {
   executor_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
   executor_thread_ = std::make_shared<std::thread>(
@@ -95,7 +103,7 @@ ManagedTransformBufferProvider::ManagedTransformBufferProvider(
   options_.start_parameter_services(false);
   random_engine_ = std::mt19937(std::random_device{}());
   dis_ = std::uniform_int_distribution<>(0, 0xFFFFFF);
-  registerAsUnknown();
+  is_static_.store(true);
 }
 
 ManagedTransformBufferProvider::~ManagedTransformBufferProvider()
@@ -140,38 +148,6 @@ void ManagedTransformBufferProvider::deactivateListener()
   tf_static_sub_.reset();
   tf_sub_.reset();
   node_.reset();
-}
-
-bool ManagedTransformBufferProvider::registerAsUnknown()
-{
-  std::lock_guard<std::mutex> listener_lock(listener_mutex_);
-  is_static_.store(true);
-  get_transform_ = [this](
-                     const std::string & target_frame, const std::string & source_frame,
-                     const tf2::TimePoint & time, const tf2::Duration & timeout,
-                     const rclcpp::Logger & logger) -> std::optional<TransformStamped> {
-    // Try to get transform from local static buffer
-    auto static_tf = getStaticTransform(target_frame, source_frame, time);
-    if (static_tf) return static_tf;
-
-    // Try to discover transform
-    return getUnknownTransform(target_frame, source_frame, time, timeout, logger);
-  };
-  return true;
-}
-
-bool ManagedTransformBufferProvider::registerAsDynamic()
-{
-  std::lock_guard<std::mutex> listener_lock(listener_mutex_);
-  if (!isStatic()) return false;  // Already dynamic
-  is_static_.store(false);
-  get_transform_ = [this](
-                     const std::string & target_frame, const std::string & source_frame,
-                     const tf2::TimePoint & time, const tf2::Duration & timeout,
-                     const rclcpp::Logger & logger) -> std::optional<TransformStamped> {
-    return getDynamicTransform(target_frame, source_frame, time, timeout, logger);
-  };
-  return true;
 }
 
 std::string ManagedTransformBufferProvider::generateUniqueNodeName()
@@ -224,10 +200,10 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::lookupTransform(
 TraverseResult ManagedTransformBufferProvider::traverseTree(
   const std::string & target_frame, const std::string & source_frame, const rclcpp::Logger & logger)
 {
-  auto framesToRoot = [this](
-                        const std::string & start_frame, const TreeMap & tf_tree,
-                        std::vector<std::string> & frames_out,
-                        const rclcpp::Logger & logger) -> bool {
+  auto frames_to_root = [this](
+                          const std::string & start_frame, const TreeMap & tf_tree,
+                          std::vector<std::string> & frames_out,
+                          const rclcpp::Logger & logger) -> bool {
     frames_out.push_back(start_frame);
     uint32_t depth = 0;
     auto current_frame = start_frame;
@@ -254,8 +230,8 @@ TraverseResult ManagedTransformBufferProvider::traverseTree(
 
   // Collect all frames from bottom to the top of TF tree for both frames
   if (
-    !framesToRoot(target_frame, last_tf_tree, frames_from_t1, logger) ||
-    !framesToRoot(source_frame, last_tf_tree, frames_from_t2, logger)) {
+    !frames_to_root(target_frame, last_tf_tree, frames_from_t1, logger) ||
+    !frames_to_root(source_frame, last_tf_tree, frames_from_t2, logger)) {
     // Possibly TF loop occurred
     return {false, false};
   }
@@ -372,7 +348,8 @@ std::optional<TransformStamped> ManagedTransformBufferProvider::getUnknownTransf
     unq_buffer_lock.unlock();
     deactivateListener();
   } else {
-    if (registerAsDynamic()) {
+    if (isStatic()) {
+      is_static_.store(false);
       RCLCPP_INFO(
         logger, "Transform %s -> %s is dynamic. Switching to dynamic listener.",
         target_frame.c_str(), source_frame.c_str());
