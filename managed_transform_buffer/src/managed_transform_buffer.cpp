@@ -312,13 +312,9 @@ bool ManagedTransformBuffer::transformPointcloud(
       cloud_in.header.frame_id.c_str());
     return false;
   }
-  if (cloud_in.data.empty()) {
-    RCLCPP_ERROR_THROTTLE(
-      logger, *provider_.getClock(), 3000, "Input cloud is empty. Cannot transform.");
-    return false;
-  }
-  if (target_frame == cloud_in.header.frame_id) {
+  if (target_frame == cloud_in.header.frame_id || cloud_in.data.empty()) {
     cloud_out = cloud_in;
+    cloud_out.header.frame_id = target_frame;
     return true;
   }
   auto eigen_transform =
