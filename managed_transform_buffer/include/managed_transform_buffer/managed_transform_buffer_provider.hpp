@@ -23,16 +23,12 @@
 #include <tf2_msgs/msg/tf_message.hpp>
 
 #include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
 
-#include <atomic>
 #include <cstddef>
 #include <memory>
-#include <mutex>
 #include <optional>
-#include <random>
-#include <shared_mutex>
 #include <string>
-#include <thread>
 #include <unordered_map>
 #include <utility>
 
@@ -93,19 +89,16 @@ using TreeMap = std::unordered_map<std::string, TreeNode>;
 class ManagedTransformBufferProvider
 {
 public:
-  /** @brief Get the instance of the ManagedTransformBufferProvider
+  /**
+   * @brief Construct a new Managed Transform Buffer Provider object
    *
-   * @return the instance of the ManagedTransformBufferProvider
+   * @param[in] clock_type type of the clock
+   * @param[in] cache_time how long to keep a history of transforms
    */
-  static ManagedTransformBufferProvider & getInstance(
-    rcl_clock_type_t clock_type, const bool force_dynamic, tf2::Duration discovery_timeout,
-    tf2::Duration cache_time);
-
-  ManagedTransformBufferProvider(const ManagedTransformBufferProvider &) = delete;
-  ManagedTransformBufferProvider & operator=(const ManagedTransformBufferProvider &) = delete;
+  explicit ManagedTransformBufferProvider(rcl_clock_type_t clock_type, tf2::Duration cache_time);
 
   /** @brief Destroy the Managed Transform Buffer object */
-  ~ManagedTransformBufferProvider();
+  ~ManagedTransformBufferProvider() = default;
 
   /**
    * @brief Get the transform between two frames by frame ID.
@@ -134,16 +127,6 @@ public:
   rclcpp::Clock::SharedPtr getClock() const;
 
 private:
-  /**
-   * @brief Construct a new Managed Transform Buffer object
-   *
-   * @param[in] clock_type type of the clock
-   * @param[in] discovery_timeout how long to wait for first TF discovery
-   * @param[in] cache_time how long to keep a history of transforms
-   */
-  explicit ManagedTransformBufferProvider(
-    rcl_clock_type_t clock_type, tf2::Duration discovery_timeout, tf2::Duration cache_time);
-
   /** @brief Initialize TF listener */
   void activateListener();
 
@@ -224,29 +207,10 @@ private:
     const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
     const tf2::Duration & timeout, const rclcpp::Logger & logger);
 
-  static std::unique_ptr<ManagedTransformBufferProvider> instance;
   rclcpp::Node::SharedPtr node_{nullptr};
   rclcpp::Clock::SharedPtr clock_{nullptr};
-  rclcpp::CallbackGroup::SharedPtr callback_group_{nullptr};
-  rclcpp::NodeOptions options_;
-  rclcpp::Subscription<tf2_msgs::msg::TFMessage>::SharedPtr tf_static_sub_{nullptr};
-  rclcpp::Subscription<tf2_msgs::msg::TFMessage>::SharedPtr tf_sub_{nullptr};
-  rclcpp::SubscriptionOptionsWithAllocator<std::allocator<void>> tf_options_;
-  rclcpp::SubscriptionOptionsWithAllocator<std::allocator<void>> tf_static_options_;
-  std::function<void(tf2_msgs::msg::TFMessage::SharedPtr)> cb_;
-  std::function<void(tf2_msgs::msg::TFMessage::SharedPtr)> cb_static_;
-  std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> executor_{nullptr};
-  std::shared_ptr<std::thread> executor_thread_{nullptr};
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
-  std::unique_ptr<TFMap> static_tf_buffer_;
-  std::unique_ptr<TreeMap> tf_tree_;
-  std::mt19937 random_engine_;
-  std::uniform_int_distribution<> dis_;
-  std::shared_mutex buffer_mutex_;
-  std::shared_mutex tree_mutex_;
-  std::mutex listener_mutex_;
-  std::atomic<bool> is_static_{true};
-  std::atomic<std::size_t> operational_threads_{0};
+  std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
   tf2::Duration discovery_timeout_;
   rclcpp::Logger logger_;
 };

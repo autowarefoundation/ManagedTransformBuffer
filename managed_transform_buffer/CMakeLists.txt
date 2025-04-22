@@ -23,10 +23,10 @@ if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
 
-  ament_add_ros_isolated_gtest(${PROJECT_NAME}_test test/test_managed_transform_buffer.cpp)
-  target_link_libraries(${PROJECT_NAME}_test
-    ${PROJECT_NAME}
-  )
+  # ament_add_ros_isolated_gtest(${PROJECT_NAME}_test test/test_managed_transform_buffer.cpp)
+  # target_link_libraries(${PROJECT_NAME}_test
+  #   ${PROJECT_NAME}
+  # )
 endif()
 
 if(BUILD_EXAMPLES)

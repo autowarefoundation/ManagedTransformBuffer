@@ -32,6 +32,7 @@
 #include <pcl/point_cloud.h>
 
 #include <chrono>
+#include <memory>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -59,8 +60,9 @@ public:
    * @param[in] cache_time how long to keep a history of transforms
    */
   explicit ManagedTransformBuffer(
-    rcl_clock_type_t clock_type = RCL_ROS_TIME, const bool force_dynamic = false,
-    tf2::Duration discovery_timeout = tf2::Duration(managed_transform_buffer::DISCOVERY_TIMEOUT),
+    rcl_clock_type_t clock_type = RCL_ROS_TIME, [[maybe_unused]] const bool force_dynamic = true,
+    [[maybe_unused]] tf2::Duration discovery_timeout =
+      tf2::Duration(managed_transform_buffer::DISCOVERY_TIMEOUT),
     tf2::Duration cache_time = tf2::Duration(tf2::BUFFER_CORE_DEFAULT_CACHE_TIME));
 
   /** @brief Destroy the Managed Transform Buffer object */
@@ -290,7 +292,7 @@ private:
    */
   static rclcpp::Logger defaultLogger();
 
-  ManagedTransformBufferProvider & provider_;
+  std::unique_ptr<ManagedTransformBufferProvider> provider_;
 };
 
 }  // namespace managed_transform_buffer

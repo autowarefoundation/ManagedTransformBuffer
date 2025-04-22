@@ -24,18 +24,17 @@
 #include <pcl/common/io.h>
 #include <pcl_conversions/pcl_conversions.h>
 
+#include <memory>
 #include <string>
 
 namespace managed_transform_buffer
 {
 
 ManagedTransformBuffer::ManagedTransformBuffer(
-  rcl_clock_type_t clock_type, const bool force_dynamic, tf2::Duration discovery_timeout,
-  tf2::Duration cache_time)
-: provider_(
-    ManagedTransformBufferProvider::getInstance(
-      clock_type, force_dynamic, discovery_timeout, cache_time))
+  rcl_clock_type_t clock_type, [[maybe_unused]] const bool force_dynamic,
+  [[maybe_unused]] tf2::Duration discovery_timeout, tf2::Duration cache_time)
 {
+  provider_ = std::make_unique<ManagedTransformBufferProvider>(clock_type, cache_time);
 }
 
 template <>
@@ -43,7 +42,7 @@ std::optional<TransformStamped> ManagedTransformBuffer::getTransform<TransformSt
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
   const tf2::Duration & timeout, const rclcpp::Logger & logger)
 {
-  return provider_.getTransform(target_frame, source_frame, time, timeout, logger);
+  return provider_->getTransform(target_frame, source_frame, time, timeout, logger);
 }
 
 template <>
@@ -51,7 +50,7 @@ std::optional<tf2::Transform> ManagedTransformBuffer::getTransform<tf2::Transfor
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
   const tf2::Duration & timeout, const rclcpp::Logger & logger)
 {
-  auto tf = provider_.getTransform(target_frame, source_frame, time, timeout, logger);
+  auto tf = provider_->getTransform(target_frame, source_frame, time, timeout, logger);
   if (!tf.has_value()) {
     return std::nullopt;
   }
@@ -67,7 +66,7 @@ std::optional<Eigen::Affine3f> ManagedTransformBuffer::getTransform<Eigen::Affin
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
   const tf2::Duration & timeout, const rclcpp::Logger & logger)
 {
-  auto tf = provider_.getTransform(target_frame, source_frame, time, timeout, logger);
+  auto tf = provider_->getTransform(target_frame, source_frame, time, timeout, logger);
   if (!tf.has_value()) {
     return std::nullopt;
   }
@@ -89,7 +88,7 @@ std::optional<Eigen::Affine3d> ManagedTransformBuffer::getTransform<Eigen::Affin
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
   const tf2::Duration & timeout, const rclcpp::Logger & logger)
 {
-  auto tf = provider_.getTransform(target_frame, source_frame, time, timeout, logger);
+  auto tf = provider_->getTransform(target_frame, source_frame, time, timeout, logger);
   if (!tf.has_value()) {
     return std::nullopt;
   }
@@ -109,7 +108,7 @@ std::optional<Eigen::Matrix4f> ManagedTransformBuffer::getTransform<Eigen::Matri
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
   const tf2::Duration & timeout, const rclcpp::Logger & logger)
 {
-  auto tf = provider_.getTransform(target_frame, source_frame, time, timeout, logger);
+  auto tf = provider_->getTransform(target_frame, source_frame, time, timeout, logger);
   if (!tf.has_value()) {
     return std::nullopt;
   }
@@ -135,7 +134,7 @@ std::optional<Eigen::Matrix4d> ManagedTransformBuffer::getTransform<Eigen::Matri
   const std::string & target_frame, const std::string & source_frame, const tf2::TimePoint & time,
   const tf2::Duration & timeout, const rclcpp::Logger & logger)
 {
-  auto tf = provider_.getTransform(target_frame, source_frame, time, timeout, logger);
+  auto tf = provider_->getTransform(target_frame, source_frame, time, timeout, logger);
   if (!tf.has_value()) {
     return std::nullopt;
   }
@@ -265,13 +264,13 @@ bool ManagedTransformBuffer::transformPointcloud(
     pcl::getFieldIndex(cloud_in, "x") == -1 || pcl::getFieldIndex(cloud_in, "y") == -1 ||
     pcl::getFieldIndex(cloud_in, "z") == -1) {
     RCLCPP_ERROR_THROTTLE(
-      logger, *provider_.getClock(), 3000,
+      logger, *provider_->getClock(), 3000,
       "Cloud does not contain x, y, z fields. Cannot transform.");
     return false;
   }
   if (target_frame.empty() || cloud_in.header.frame_id.empty()) {
     RCLCPP_ERROR_THROTTLE(
-      logger, *provider_.getClock(), 3000,
+      logger, *provider_->getClock(), 3000,
       "Target frame (%s) or source frame (%s) is empty. Cannot transform.", target_frame.c_str(),
       cloud_in.header.frame_id.c_str());
     return false;
@@ -301,13 +300,13 @@ bool ManagedTransformBuffer::transformPointcloud(
     pcl::getFieldIndex(cloud_in, "x") == -1 || pcl::getFieldIndex(cloud_in, "y") == -1 ||
     pcl::getFieldIndex(cloud_in, "z") == -1) {
     RCLCPP_ERROR_THROTTLE(
-      logger, *provider_.getClock(), 3000,
+      logger, *provider_->getClock(), 3000,
       "Cloud does not contain x, y, z fields. Cannot transform.");
     return false;
   }
   if (target_frame.empty() || cloud_in.header.frame_id.empty()) {
     RCLCPP_ERROR_THROTTLE(
-      logger, *provider_.getClock(), 3000,
+      logger, *provider_->getClock(), 3000,
       "Target frame (%s) or source frame (%s) is empty. Cannot transform.", target_frame.c_str(),
       cloud_in.header.frame_id.c_str());
     return false;
@@ -350,7 +349,7 @@ bool ManagedTransformBuffer::transformPointcloud(
 
 bool ManagedTransformBuffer::isStatic() const
 {
-  return provider_.isStatic();
+  return provider_->isStatic();
 }
 
 rclcpp::Logger ManagedTransformBuffer::defaultLogger()
