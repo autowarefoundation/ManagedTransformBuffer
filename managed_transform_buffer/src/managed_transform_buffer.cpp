@@ -290,57 +290,10 @@ bool ManagedTransformBuffer::transformPointcloud(
   return true;
 }
 
-template <typename PointT>
-bool ManagedTransformBuffer::transformPointcloud(
-  const std::string & target_frame, const pcl::PointCloud<PointT> & cloud_in,
-  pcl::PointCloud<PointT> & cloud_out, const tf2::TimePoint & time, const tf2::Duration & timeout,
-  const rclcpp::Logger & logger)
-{
-  if (
-    pcl::getFieldIndex(cloud_in, "x") == -1 || pcl::getFieldIndex(cloud_in, "y") == -1 ||
-    pcl::getFieldIndex(cloud_in, "z") == -1) {
-    RCLCPP_ERROR_THROTTLE(
-      logger, *provider_->getClock(), 3000,
-      "Cloud does not contain x, y, z fields. Cannot transform.");
-    return false;
-  }
-  if (target_frame.empty() || cloud_in.header.frame_id.empty()) {
-    RCLCPP_ERROR_THROTTLE(
-      logger, *provider_->getClock(), 3000,
-      "Target frame (%s) or source frame (%s) is empty. Cannot transform.", target_frame.c_str(),
-      cloud_in.header.frame_id.c_str());
-    return false;
-  }
-  if (target_frame == cloud_in.header.frame_id || cloud_in.data.empty()) {
-    cloud_out = cloud_in;
-    cloud_out.header.frame_id = target_frame;
-    return true;
-  }
-  auto eigen_transform =
-    getTransform<Eigen::Matrix4f>(target_frame, cloud_in.header.frame_id, time, timeout, logger);
-  if (!eigen_transform.has_value()) {
-    return false;
-  }
-  pcl_ros::transformPointCloud(eigen_transform.value(), cloud_in, cloud_out);
-  cloud_out.header.frame_id = target_frame;
-  return true;
-}
-
 bool ManagedTransformBuffer::transformPointcloud(
   const std::string & target_frame, const sensor_msgs::msg::PointCloud2 & cloud_in,
   sensor_msgs::msg::PointCloud2 & cloud_out, const rclcpp::Time & time,
   const rclcpp::Duration & timeout, const rclcpp::Logger & logger)
-{
-  return transformPointcloud(
-    target_frame, cloud_in, cloud_out, tf2_ros::fromRclcpp(time), tf2_ros::fromRclcpp(timeout),
-    logger);
-}
-
-template <typename PointT>
-bool ManagedTransformBuffer::transformPointcloud(
-  const std::string & target_frame, const pcl::PointCloud<PointT> & cloud_in,
-  pcl::PointCloud<PointT> & cloud_out, const rclcpp::Time & time, const rclcpp::Duration & timeout,
-  const rclcpp::Logger & logger)
 {
   return transformPointcloud(
     target_frame, cloud_in, cloud_out, tf2_ros::fromRclcpp(time), tf2_ros::fromRclcpp(timeout),
