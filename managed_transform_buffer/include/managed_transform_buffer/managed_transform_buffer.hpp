@@ -29,6 +29,7 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <tf2_msgs/msg/tf_message.hpp>
 
+#include <pcl/common/transforms.h>
 #include <pcl/point_cloud.h>
 
 #include <chrono>
@@ -252,7 +253,29 @@ public:
   bool transformPointcloud(
     const std::string & target_frame, const pcl::PointCloud<PointT> & cloud_in,
     pcl::PointCloud<PointT> & cloud_out, const tf2::TimePoint & time, const tf2::Duration & timeout,
-    const rclcpp::Logger & logger = defaultLogger());
+    const rclcpp::Logger & logger = defaultLogger())
+  {
+    if (target_frame.empty() || cloud_in.header.frame_id.empty()) {
+      RCLCPP_ERROR_THROTTLE(
+        logger, *provider_->getClock(), 3000,
+        "Target frame (%s) or source frame (%s) is empty. Cannot transform.", target_frame.c_str(),
+        cloud_in.header.frame_id.c_str());
+      return false;
+    }
+    if (target_frame == cloud_in.header.frame_id || cloud_in.points.empty()) {
+      cloud_out = cloud_in;
+      cloud_out.header.frame_id = target_frame;
+      return true;
+    }
+    auto eigen_transform =
+      getTransform<Eigen::Matrix4f>(target_frame, cloud_in.header.frame_id, time, timeout, logger);
+    if (!eigen_transform.has_value()) {
+      return false;
+    }
+    pcl::transformPointCloud(cloud_in, cloud_out, eigen_transform.value());
+    cloud_out.header.frame_id = target_frame;
+    return true;
+  }
 
   /**
    * @brief Transforms a point cloud from one frame to another.
@@ -275,7 +298,12 @@ public:
   bool transformPointcloud(
     const std::string & target_frame, const pcl::PointCloud<PointT> & cloud_in,
     pcl::PointCloud<PointT> & cloud_out, const rclcpp::Time & time,
-    const rclcpp::Duration & timeout, const rclcpp::Logger & logger = defaultLogger());
+    const rclcpp::Duration & timeout, const rclcpp::Logger & logger = defaultLogger())
+  {
+    return transformPointcloud<PointT>(
+      target_frame, cloud_in, cloud_out, tf2_ros::fromRclcpp(time), tf2_ros::fromRclcpp(timeout),
+      logger);
+  }
 
   /** @brief Check if all TFs requests have been for static TF so far.
    *
@@ -290,7 +318,7 @@ private:
    */
   static rclcpp::Logger defaultLogger();
 
-  ManagedTransformBufferProvider & provider_;
+  ManagedTransformBufferProvider * provider_;
 };
 
 }  // namespace managed_transform_buffer
